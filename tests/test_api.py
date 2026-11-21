@@ -66,6 +66,7 @@ def test_regular_repassa_payload_e_extras(monkeypatch):
     body = json.loads(sent.content)
     assert body["itens"][0]["aliquotasNominais"]["cbs"] == 8.8  # campo extra preservado
     assert "nbs" not in body["itens"][0]  # None não é enviado
+    assert body["versao"] == "1.0.0" and len(body["id"]) == 32  # preenchidos pela API
 
 
 def test_simples_vai_para_nao_assistido(monkeypatch):

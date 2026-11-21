@@ -240,7 +240,11 @@ async function post(url, body) {
   let data = null; try { data = await resp.json(); } catch { /* corpo vazio */ }
   if (!resp.ok) {
     const d = data?.detail;
-    const msg = Array.isArray(d) ? d.map((e) => `${(e.loc || []).slice(1).join(".")}: ${e.msg}`).join("; ") : (typeof d === "string" ? d : JSON.stringify(d ?? data));
+    let msg;
+    if (Array.isArray(d)) msg = d.map((e) => `${(e.loc || []).slice(1).join(".")}: ${e.msg}`).join("; ");
+    else if (typeof d === "string") msg = d;
+    else if (d && Array.isArray(d.errors)) msg = `${d.title || "Erro"} — ` + d.errors.map((e) => `${e.code} ${e.pointer || ""}: ${e.detail || e.title}`).join(" | ");
+    else msg = d?.detail || JSON.stringify(d ?? data);
     throw new Error(`HTTP ${resp.status} — ${msg}`);
   }
   return data;

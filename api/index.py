@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import re
+import uuid
 from typing import Any
 
 import httpx
@@ -136,13 +137,19 @@ def health() -> dict[str, Any]:
 @app.post("/api/regime-geral/calcular")
 def calcular_regular(op: OperacaoRegular) -> Any:
     """Cálculo de CBS/IBS/IS (regime geral) com erros por item (observabilidade)."""
-    return _call("regular", "POST", REGULAR_CALCULO, json=op.model_dump(exclude_none=True))
+    body = op.model_dump(exclude_none=True)
+    body.setdefault("id", uuid.uuid4().hex)  # o motor exige id e versao
+    body.setdefault("versao", "1.0.0")
+    return _call("regular", "POST", REGULAR_CALCULO, json=body)
 
 
 @app.post("/api/simples-nacional/calcular")
 def calcular_simples(op: OperacaoSimples) -> Any:
     """Cálculo de CBS/IBS no Simples Nacional (não assistido) com erros por item."""
-    return _call("simples", "POST", SIMPLES_CALCULO, json=op.model_dump(exclude_none=True))
+    body = op.model_dump(exclude_none=True)
+    body.setdefault("id", uuid.uuid4().hex)
+    body.setdefault("versao", "3.0.0")
+    return _call("simples", "POST", SIMPLES_CALCULO, json=body)
 
 
 @app.get("/api/erros/{regime}/{codigo}")
