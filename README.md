@@ -98,3 +98,15 @@ e usa o cAtivSN informado) e **compara com os valores destacados** (`vCBS`, `vIB
 - Aceita modelos 55 e 65. Não lê CT-e, NFS-e nem eventos. A base usada é o `vBC` do grupo IBSCBS, ou vProd+vFrete+vSeg+vOutro−vDesc.
 - Exemplo: `/exemplos/nfe-exemplo.zip` (3 notas de homologação: confere, com divergência plantada e Simples).
   Gerador: `tools/gerar_xml_exemplo.py`; os valores destacados vêm de `tools/valores-exemplo-xml.json` (calculados pelo motor).
+
+## Andamento em tempo real e desempenho
+
+As três importações aceitam o campo `progresso=1`: em vez de um JSON no fim, o servidor transmite linhas NDJSON
+(`{"e":"inicio","total":N}`, `{"e":"prog","feito":K}`, `{"e":"fim","dados":{...}}` ou `{"e":"erro","status":...}`).
+A tela usa isso para mostrar o percentual do fluxo inteiro (envio 10% + leitura 4% + cálculo 84% + finalização 2%) e o
+tempo restante. Sem `progresso`, o comportamento é o de antes (JSON único). Erros de validação continuam HTTP 4xx normais.
+
+- O cálculo vai ao motor em blocos de 50 itens, 3 chamadas simultâneas (`CHUNK`, `WORKERS` em `api/index.py`).
+- Medido ao vivo: ~20 ms por item e **sem ganho com chamadas paralelas** (o motor no plano gratuito do Render tem pouca CPU),
+  então 1.000 itens levam ~20 s. Para acelerar de verdade, o caminho é um plano pago do Render para os motores (mais CPU,
+  e sem dormir): o tempo cai em proporção à CPU e a espera de 1–3 min do primeiro acesso desaparece.
