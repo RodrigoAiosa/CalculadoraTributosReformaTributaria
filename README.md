@@ -85,3 +85,16 @@ enviados ao motor em blocos de 100. Só documentos com CRT (55, 65, 57, 67, 63, 
 - O motor devolve `NAO_CALCULADO` (sem erro) para atividade não admitida no tpDoc; confira a coluna Estado.
 - Pares recusados pelo motor no exemplo: cClassTrib 200044 não vale para tpDoc 55 (VSN-022) e alguns NCM
   sem vínculo com 200003/200004/200034 (VSN-047) — foram retirados.
+
+## Leitura de XML de NF-e/NFC-e
+
+Aba **XML de NF-e** (`POST /api/xml/importar`): envie vários `.xml` ou um `.zip` (até 200 notas, 40 MB). Para cada nota a
+ferramenta lê data (`dhEmi`), município (`cMunFG`), UF do emitente, CRT, e por item NCM, `CST`, `cClassTrib`, base e alíquotas
+(`pCBS`, `pIBSUF`, `pIBSMun`), calcula no motor (CRT 3 → regime regular; CRT 1/2/4 → Simples, que exige as alíquotas efetivas
+e usa o cAtivSN informado) e **compara com os valores destacados** (`vCBS`, `vIBS`). Situações por item: `CONFERE`,
+`DIVERGENTE` (acima da tolerância, padrão R$ 0,01), `SEM_DESTAQUE`, `NAO_CALCULADO` (erro do motor) e `PULADO` (sem NCM de
+8 dígitos ou sem grupo IBSCBS). XML com DOCTYPE/ENTITY é recusado, e um XML ruim não derruba o lote.
+
+- Aceita modelos 55 e 65. Não lê CT-e, NFS-e nem eventos. A base usada é o `vBC` do grupo IBSCBS, ou vProd+vFrete+vSeg+vOutro−vDesc.
+- Exemplo: `/exemplos/nfe-exemplo.zip` (3 notas de homologação: confere, com divergência plantada e Simples).
+  Gerador: `tools/gerar_xml_exemplo.py`; os valores destacados vêm de `tools/valores-exemplo-xml.json` (calculados pelo motor).
