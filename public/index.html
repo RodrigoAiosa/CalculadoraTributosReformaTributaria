@@ -682,35 +682,86 @@ document.querySelectorAll(".drop").forEach((box) => {
   });
 });
 const fmtMB = (b) => (b / 1048576).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + " MB";
+const fmtN = (n) => Number(n).toLocaleString("pt-BR");
 let relogio = null;
+// Barra de espera. Sem `envio`, é só "calculando" (digitação manual); com `envio`, é a barra de percentual do fluxo completo.
 function espera(out, envio = false) {
   clearInterval(relogio);
   out.innerHTML = `<div class="progress ${envio ? "" : "calc"}" id="prog"><div class="top"><div id="prog-t">${envio ? "Enviando o arquivo…" : "Calculando no motor oficial…"}</div><span id="prog-p">${envio ? "0%" : ""}</span></div>
-    <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" ${envio ? 'aria-valuenow="0"' : ""} aria-label="Progresso"><i id="prog-i"></i></div>
+    <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" ${envio ? 'aria-valuenow="0"' : ""} aria-label="Andamento"><i id="prog-i"></i></div>
     <p class="note" id="prog-n">${envio ? "" : "Se o motor estiver dormindo, a primeira resposta pode levar até 3 minutos."}</p></div>`;
 }
-// POST com barra de progresso do envio (fetch não informa o progresso de upload). Devolve algo parecido com um Response.
+// Fluxo completo em % : envio 10 + leitura 4 + cálculo 84 + finalização 2. O servidor transmite o andamento (NDJSON) enquanto calcula.
+const FASE = { envio: 10, leitura: 4, calculo: 84 };
+const CHUNK_SERVIDOR = 50;
 function enviarComProgresso(url, fd, out) {
   return new Promise((resolve, reject) => {
+    fd.append("progresso", "1");
     espera(out, true);
-    const prog = $("prog"), t0 = Date.now(), xhr = new XMLHttpRequest();
+    const prog = $("prog"), barra = prog.querySelector(".bar"), t0 = Date.now();
+    const st = { fase: "envio", up: 0, total: 0, feito: 0, taxa: 0, tUlt: 0, tIni: 0, exibido: 0, bytes: "", fim: false };
+    let lidos = 0, ndjson = false, final = null;
+
+    const alvo = () => {
+      if (st.fase === "envio") return FASE.envio * st.up;
+      if (st.fase === "leitura") return FASE.envio + Math.min(FASE.leitura - 0.5, (Date.now() - st.tUlt) / 1000);
+      if (!st.total) return FASE.envio + FASE.leitura;
+      const extra = st.taxa > 0 ? Math.min(st.taxa * (Date.now() - st.tUlt) / 1000, CHUNK_SERVIDOR * 0.9) : 0;  // avanço estimado entre dois avisos
+      return FASE.envio + FASE.leitura + FASE.calculo * Math.min(1, (st.feito + extra) / st.total);
+    };
+    const desenhar = () => {
+      const topo = st.fase === "calculo" && st.total ? 98 : 99;
+      st.exibido = st.fim ? 100 : Math.max(st.exibido, Math.min(topo, alvo()));
+      const pct = Math.round(st.exibido);
+      $("prog-i").style.width = st.exibido + "%"; barra.setAttribute("aria-valuenow", pct);
+      let texto = pct + "%", titulo = "Enviando o arquivo…", nota = "";
+      if (st.fase === "envio") texto += ` · ${fmtMB(st.bytes ? st.bytes.l : 0)} de ${fmtMB(st.bytes ? st.bytes.t : 0)}`;
+      if (st.fase === "leitura") titulo = "Lendo e validando a planilha…";
+      if (st.fase === "calculo") {
+        titulo = "Calculando no motor oficial…";
+        texto += st.total ? ` · ${fmtN(Math.min(st.feito, st.total))} de ${fmtN(st.total)} itens` : "";
+        if (st.taxa > 0 && st.total > st.feito) { const seg = Math.ceil((st.total - st.feito) / st.taxa); texto += seg > 1 ? ` · faltam ~${seg < 90 ? seg + " s" : Math.round(seg / 60) + " min"}` : " · quase lá"; }
+        if (st.feito === 0 && Date.now() - st.tUlt > 8000) nota = "O motor gratuito dorme quando fica parado: a primeira resposta pode levar até 3 minutos. Depois disso o cálculo é rápido.";
+      }
+      if (st.fim) { titulo = "Concluído"; texto = "100%"; }
+      $("prog-t").textContent = titulo; $("prog-p").textContent = texto; $("prog-n").textContent = nota;
+    };
+    relogio = setInterval(desenhar, 150);
+
+    const evento = (ev) => {
+      const agora = Date.now();
+      if (ev.e === "inicio") { st.fase = "calculo"; st.total = ev.total; st.tUlt = st.tIni = agora; st.feito = 0; const b = document.querySelector("button.primary:disabled"); if (b) b.textContent = "Calculando…"; }
+      else if (ev.e === "prog") {
+        const dt = (agora - st.tUlt) / 1000, inst = (ev.feito - st.feito) / Math.max(0.05, dt);
+        if (!(st.feito === 0 && dt > 20)) st.taxa = st.taxa ? 0.6 * st.taxa + 0.4 * inst : inst;   // 1º bloco muito lento = motor acordando: não serve de referência
+        st.feito = ev.feito; st.tUlt = agora;
+      }
+      else if (ev.e === "fim") final = { ok: true, status: 200, dados: ev.dados };
+      else if (ev.e === "erro") final = { ok: false, status: ev.status, dados: { detail: ev.detail } };
+    };
+    const ler = () => {
+      const texto = xhr.responseText; let i;
+      while ((i = texto.indexOf("\n", lidos)) !== -1) {
+        const linha = texto.slice(lidos, i).trim(); lidos = i + 1;
+        if (linha) { try { evento(JSON.parse(linha)); } catch { /* linha parcial */ } }
+      }
+    };
+
+    const xhr = new XMLHttpRequest();
     xhr.open("POST", url);
-    xhr.upload.onprogress = (e) => {
-      if (!e.lengthComputable) return;
-      const pct = Math.round((e.loaded / e.total) * 100);
-      $("prog-i").style.width = pct + "%"; $("prog-p").textContent = `${pct}% · ${fmtMB(e.loaded)} de ${fmtMB(e.total)}`;
-      prog.querySelector(".bar").setAttribute("aria-valuenow", pct);
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable) { st.up = e.loaded / e.total; st.bytes = { l: e.loaded, t: e.total }; } };
+    xhr.upload.onload = () => { st.up = 1; st.fase = "leitura"; st.tUlt = Date.now(); const b = document.querySelector("button.primary:disabled"); if (b) b.textContent = "Calculando…"; };
+    xhr.onreadystatechange = () => { if (xhr.readyState === 2) ndjson = (xhr.getResponseHeader("content-type") || "").includes("ndjson"); };
+    xhr.onprogress = () => { if (ndjson) ler(); };
+    xhr.onload = () => {
+      clearInterval(relogio);
+      if (!ndjson) { resolve({ ok: xhr.status >= 200 && xhr.status < 300, status: xhr.status, json: async () => JSON.parse(xhr.responseText) }); return; }
+      ler();
+      if (!final) { reject(new Error("A conexão foi interrompida antes do fim do cálculo. Tente de novo; se o arquivo for grande, divida-o em partes.")); return; }
+      if (final.ok) { st.fim = true; desenhar(); setTimeout(() => resolve({ ok: true, status: 200, json: async () => final.dados }), 350); }
+      else resolve({ ok: false, status: final.status, json: async () => final.dados });
     };
-    xhr.upload.onload = () => {   // arquivo entregue: agora o servidor calcula
-      prog.classList.add("calc"); $("prog-t").textContent = "Calculando no motor oficial…";
-      const b = document.querySelector("button.primary:disabled"); if (b) b.textContent = "Calculando…";
-      $("prog-n").textContent = "Arquivo recebido. Se o motor estiver dormindo, a primeira resposta pode levar até 3 minutos.";
-      prog.querySelector(".bar").removeAttribute("aria-valuenow");
-      relogio = setInterval(() => { if ($("prog-p")) $("prog-p").textContent = `${Math.round((Date.now() - t0) / 1000)} s`; }, 1000);
-    };
-    xhr.onload = () => { clearInterval(relogio); resolve({ ok: xhr.status >= 200 && xhr.status < 300, status: xhr.status, json: async () => JSON.parse(xhr.responseText) }); };
-    xhr.onerror = () => { clearInterval(relogio); reject(new Error("Falha de rede ao enviar o arquivo. Verifique a conexão e tente de novo.")); };
-    xhr.ontimeout = xhr.onerror;
+    xhr.onerror = xhr.ontimeout = () => { clearInterval(relogio); reject(new Error("Falha de rede durante o envio ou o cálculo. Verifique a conexão e tente de novo.")); };
     xhr.send(fd);
   });
 }

@@ -144,3 +144,12 @@ def test_sem_arquivos_e_zip_invalido(monkeypatch):
     motor(monkeypatch)
     assert enviar([("a.zip", b"nao e zip")]).status_code == 422
     assert enviar([("a.zip", zipfile.ZipFile(io.BytesIO(), "w") and b"")]).status_code == 422
+
+
+def test_progresso_xml_conta_itens(monkeypatch, exemplo):
+    motor(monkeypatch)
+    r = client.post("/api/xml/importar", data={"aliquotasEfetivas": ALIQ, "progresso": "1"}, files=[("arquivos", ("lote.zip", exemplo, "application/zip"))])
+    ev = [json.loads(l) for l in r.text.splitlines() if l.strip()]
+    assert ev[0] == {"e": "inicio", "total": 13}
+    assert [e["feito"] for e in ev if e["e"] == "prog"][-1] == 13  # o item sem IBSCBS não vai ao motor, mas conta como concluído
+    assert ev[-1]["e"] == "fim" and ev[-1]["dados"]["resumo"]["notas"] == 3

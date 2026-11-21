@@ -14,7 +14,10 @@ import os
 import re
 import unicodedata
 import uuid
-from concurrent.futures import ThreadPoolExecutor
+import json
+import queue
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -208,7 +211,8 @@ def dados_abertos(
 
 
 # ---------------------------------------------------------------- importação de planilha (.xlsx)
-CHUNK = 100                      # itens por chamada ao motor (uma NF-e aceita até 990)
+CHUNK = 50                       # itens por chamada ao motor (uma NF-e aceita até 990); blocos menores = andamento mais fluido
+WORKERS = 3                      # chamadas simultâneas ao motor
 MAX_LINHAS = 5000
 MAX_BYTES = 10 * 1024 * 1024
 ESTADOS_CALCULADOS = {"CALCULADO", "CALCULO_SIMULADO"}
@@ -390,6 +394,52 @@ def _opcional(v: str | None) -> float | None:
         raise HTTPException(status_code=422, detail=f"Alíquota inválida: {v}") from exc
 
 
+# --- andamento em tempo real: o servidor devolve linhas JSON (NDJSON) enquanto calcula -------------------------
+def _rodar_blocos(fn: Any, blocos: list[list[dict[str, Any]]], notificar: Any) -> list[dict[str, Any]]:
+    """Chama o motor para cada bloco (em paralelo) e avisa a cada bloco concluído, com o total de itens já feitos."""
+    respostas: list[Any] = [None] * len(blocos)
+    feito = 0
+    with ThreadPoolExecutor(max_workers=WORKERS) as pool:
+        futuros = {pool.submit(fn, b): i for i, b in enumerate(blocos)}
+        for f in as_completed(futuros):
+            i = futuros[f]
+            respostas[i] = f.result()
+            feito += len(blocos[i])
+            notificar({"e": "prog", "feito": feito})
+    return respostas
+
+
+def _responder(trabalho: Any, progresso: str) -> Any:
+    """Sem `progresso`: devolve o JSON de uma vez. Com `progresso`: transmite eventos NDJSON e termina com {"e":"fim","dados":...}."""
+    if not progresso:
+        return trabalho(lambda ev: None)
+    fila: queue.Queue = queue.Queue()
+
+    def alvo() -> None:
+        try:
+            fila.put({"e": "fim", "dados": trabalho(fila.put)})
+        except HTTPException as exc:
+            fila.put({"e": "erro", "status": exc.status_code, "detail": exc.detail})
+        except Exception as exc:  # noqa: BLE001
+            fila.put({"e": "erro", "status": 500, "detail": f"Erro inesperado: {exc}"})
+        fila.put(None)
+
+    threading.Thread(target=alvo, daemon=True).start()
+
+    def linhas() -> Any:
+        while True:
+            try:
+                ev = fila.get(timeout=10)
+            except queue.Empty:
+                yield b"\n"  # mantém a conexão viva enquanto o motor acorda
+                continue
+            if ev is None:
+                return
+            yield (json.dumps(ev, default=str) + "\n").encode()
+
+    return StreamingResponse(linhas(), media_type="application/x-ndjson", headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"})
+
+
 @app.post("/api/regime-geral/importar")
 def importar(
     arquivo: UploadFile = File(...),
@@ -399,8 +449,9 @@ def importar(
     cbs: str | None = Form(None),
     ibsEstadual: str | None = Form(None),
     ibsMunicipal: str | None = Form(None),
+    progresso: str = Form(""),
 ) -> Any:
-    """Calcula CBS/IBS/IS para os produtos de uma planilha .xlsx (em blocos de 100 itens)."""
+    """Calcula CBS/IBS/IS para os produtos de uma planilha .xlsx (em blocos de 50 itens). Com `progresso`, transmite o andamento."""
     conteudo = arquivo.file.read(MAX_BYTES + 1)
     if len(conteudo) > MAX_BYTES:
         raise HTTPException(status_code=413, detail="Arquivo maior que 10 MB.")
@@ -410,23 +461,25 @@ def importar(
     ctx = {"dh": dhFatoGerador, "municipio": municipio, "uf": uf.upper(), "aliquotas": aliquotas}
     blocos = [itens[i : i + CHUNK] for i in range(0, len(itens), CHUNK)]
 
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        respostas = list(pool.map(lambda b: _bloco(ctx, b), blocos))
+    def trabalho(notificar: Any) -> dict[str, Any]:
+        notificar({"e": "inicio", "total": len(itens)})
+        respostas = _rodar_blocos(lambda b: _bloco(ctx, b), blocos, notificar)
+        resultado = [r for b, resp in zip(blocos, respostas) for r in _resumir(b, resp)]
+        por_estado: dict[str, int] = {}
+        totais = {"vBC": Decimal("0"), "vCBS": Decimal("0"), "vIBS": Decimal("0"), "vIS": Decimal("0")}
+        for r in resultado:
+            por_estado[r["estado"]] = por_estado.get(r["estado"], 0) + 1
+            if r["estado"] in ESTADOS_CALCULADOS:
+                for k in totais:
+                    totais[k] += _dec(r[k])
+        return {
+            "resumo": {"produtos": len(resultado), "blocos": len(blocos), "porEstado": por_estado, "comErro": sum(1 for r in resultado if r["erros"] or r["estado"] not in ESTADOS_CALCULADOS)},
+            "totais": {k: f"{v:.2f}" for k, v in totais.items()},
+            "avisos": sorted({r["aviso"] for r in respostas if r.get("aviso")}),
+            "itens": resultado,
+        }
 
-    resultado = [r for b, resp in zip(blocos, respostas) for r in _resumir(b, resp)]
-    por_estado: dict[str, int] = {}
-    totais = {"vBC": Decimal("0"), "vCBS": Decimal("0"), "vIBS": Decimal("0"), "vIS": Decimal("0")}
-    for r in resultado:
-        por_estado[r["estado"]] = por_estado.get(r["estado"], 0) + 1
-        if r["estado"] in ESTADOS_CALCULADOS:
-            for k in totais:
-                totais[k] += _dec(r[k])
-    return {
-        "resumo": {"produtos": len(resultado), "blocos": len(blocos), "porEstado": por_estado, "comErro": sum(1 for r in resultado if r["erros"] or r["estado"] not in ESTADOS_CALCULADOS)},
-        "totais": {k: f"{v:.2f}" for k, v in totais.items()},
-        "avisos": sorted({r["aviso"] for r in respostas if r.get("aviso")}),
-        "itens": resultado,
-    }
+    return _responder(trabalho, progresso)
 
 
 @app.get("/api/modelo.xlsx")
@@ -496,10 +549,9 @@ def importar_simples(
     tpDoc: str = Form(...),
     CRT: str = Form(...),
     aliquotasEfetivas: str = Form(...),
+    progresso: str = Form(""),
 ) -> Any:
     """Calcula CBS/IBS no Simples Nacional para os produtos de uma planilha .xlsx (documentos com CRT)."""
-    import json
-
     if tpDoc not in TPDOC_COM_CRT:
         raise HTTPException(status_code=422, detail="A importação aceita documentos com CRT (55, 65, 57, 67, 63, 93, 62). A NFS-e (91) admite só 1 item por nota: use a digitação manual.")
     try:
@@ -516,25 +568,27 @@ def importar_simples(
 
     ctx = {"data": data, "tpDoc": tpDoc, "CRT": CRT, "aliquotas": aliq}
     blocos = [itens[i : i + CHUNK] for i in range(0, len(itens), CHUNK)]
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        respostas = list(pool.map(lambda b: _bloco_simples(ctx, b), blocos))
+    def trabalho(notificar: Any) -> dict[str, Any]:
+        notificar({"e": "inicio", "total": len(itens)})
+        respostas = _rodar_blocos(lambda b: _bloco_simples(ctx, b), blocos, notificar)
+        resultado = [r for b, resp in zip(blocos, respostas) for r in _resumir_simples(b, resp)]
+        por_estado: dict[str, int] = {}
+        totais = {"vBC": Decimal("0"), "vCBS": Decimal("0"), "vIBS": Decimal("0"), "vIS": Decimal("0"), "total": Decimal("0")}
+        for r in resultado:
+            por_estado[r["estado"]] = por_estado.get(r["estado"], 0) + 1
+            if r["estado"] in SIMPLES_ESTADOS_OK:
+                for k in totais:
+                    totais[k] += _dec(r[k])
+        avisos = sorted({a for r in resultado for a in r["avisos"]})
+        return {
+            "resumo": {"produtos": len(resultado), "blocos": len(blocos), "porEstado": por_estado,
+                       "comErro": sum(1 for r in resultado if r["erros"] or r["estado"] not in SIMPLES_ESTADOS_OK)},
+            "totais": {k: f"{v:.2f}" for k, v in totais.items()},
+            "avisos": avisos[:20],
+            "itens": resultado,
+        }
 
-    resultado = [r for b, resp in zip(blocos, respostas) for r in _resumir_simples(b, resp)]
-    por_estado: dict[str, int] = {}
-    totais = {"vBC": Decimal("0"), "vCBS": Decimal("0"), "vIBS": Decimal("0"), "vIS": Decimal("0"), "total": Decimal("0")}
-    for r in resultado:
-        por_estado[r["estado"]] = por_estado.get(r["estado"], 0) + 1
-        if r["estado"] in SIMPLES_ESTADOS_OK:
-            for k in totais:
-                totais[k] += _dec(r[k])
-    avisos = sorted({a for r in resultado for a in r["avisos"]})
-    return {
-        "resumo": {"produtos": len(resultado), "blocos": len(blocos), "porEstado": por_estado,
-                   "comErro": sum(1 for r in resultado if r["erros"] or r["estado"] not in SIMPLES_ESTADOS_OK)},
-        "totais": {k: f"{v:.2f}" for k, v in totais.items()},
-        "avisos": avisos[:20],
-        "itens": resultado,
-    }
+    return _responder(trabalho, progresso)
 
 
 @app.get("/api/modelo-simples.xlsx")
@@ -566,7 +620,6 @@ def modelo_simples() -> StreamingResponse:
 # ---------------------------------------------------------------------------
 # Leitura de XML de NF-e/NFC-e (modelos 55 e 65): calcula pelo motor e confere com o que a nota destacou
 # ---------------------------------------------------------------------------
-import json  # noqa: E402
 import zipfile  # noqa: E402
 from xml.etree import ElementTree as ET  # noqa: E402
 
@@ -668,7 +721,7 @@ def _status(it: dict[str, Any], calc: dict[str, Any], ok_estados: set[str], tol:
     return ("DIVERGENTE" if diverge else "CONFERE"), dif
 
 
-def _processar_nota(nota: dict[str, Any], cativ: str, aliq_sn: dict[str, Any] | None, tol: Decimal) -> dict[str, Any]:
+def _processar_nota(nota: dict[str, Any], cativ: str, aliq_sn: dict[str, Any] | None, tol: Decimal, ao_bloco: Any = None) -> dict[str, Any]:
     itens = nota["itens"]
     saida: dict[int, dict[str, Any]] = {}
     pular: dict[int, str] = {}
@@ -685,6 +738,8 @@ def _processar_nota(nota: dict[str, Any], cativ: str, aliq_sn: dict[str, Any] | 
     if regime == "simples" and not aliq_sn:
         pular = {i: "Informe as alíquotas efetivas do Simples para calcular notas de optantes" for i in range(len(itens))}
     ok = [i for i in range(len(itens)) if i not in pular]
+    if ao_bloco and pular:
+        ao_bloco(len(pular))  # itens que não vão ao motor já contam como concluídos
 
     respostas: list[dict[str, Any]] = []
     if ok and regime == "regular":
@@ -707,6 +762,8 @@ def _processar_nota(nota: dict[str, Any], cativ: str, aliq_sn: dict[str, Any] | 
                 respostas.append(resp)
                 for r in _resumir(bloco, resp):
                     saida[r["linha"]] = r
+                if ao_bloco:
+                    ao_bloco(len(bloco))
         ok_estados = ESTADOS_CALCULADOS
     elif ok and regime == "simples":
         ctx = {"data": nota["dhEmi"][:10], "tpDoc": nota["mod"], "CRT": nota["crt"], "aliquotas": aliq_sn}
@@ -718,6 +775,8 @@ def _processar_nota(nota: dict[str, Any], cativ: str, aliq_sn: dict[str, Any] | 
             respostas.append(resp)
             for r in _resumir_simples(bloco, resp):
                 saida[r["linha"]] = r
+            if ao_bloco:
+                ao_bloco(len(bloco))
         ok_estados = SIMPLES_ESTADOS_OK
     else:
         ok_estados = ESTADOS_CALCULADOS
@@ -780,6 +839,7 @@ def importar_xml(
     cAtivSN: str = Form("01", pattern=r"^\d{1,2}$"),
     aliquotasEfetivas: str = Form(""),
     tolerancia: str = Form("0.01"),
+    progresso: str = Form(""),
 ) -> Any:
     """Lê XMLs de NF-e/NFC-e, calcula CBS/IBS no motor oficial e compara com o que a nota destacou."""
     tol = _decimal(tolerancia)
@@ -796,28 +856,46 @@ def importar_xml(
 
     xmls = _coletar_xmls(arquivos)
 
-    def trabalhar(par: tuple[str, bytes]) -> dict[str, Any]:
-        nome, dados = par
+    lidas: list[tuple[str, dict[str, Any] | str]] = []
+    for nome, dados in xmls:
         try:
-            nota = ler_nfe(dados)
+            lidas.append((nome, ler_nfe(dados)))
         except ValueError as exc:
-            return {"arquivo": nome, "erro": str(exc)}
-        r = _processar_nota(nota, cAtivSN.zfill(2), aliq_sn, tol)
-        return {"arquivo": nome, **{k: nota[k] for k in ("chave", "mod", "nNF", "dhEmi", "emitente", "crt")}, **r}
+            lidas.append((nome, str(exc)))
+    total_itens = sum(len(n["itens"]) for _, n in lidas if isinstance(n, dict))
 
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        notas = list(pool.map(trabalhar, xmls))
+    def trabalho(notificar: Any) -> dict[str, Any]:
+        notificar({"e": "inicio", "total": total_itens})
+        feito = [0]
+        trava = threading.Lock()
 
-    geral: dict[str, int] = {}
-    tot = {"calcCBS": Decimal("0"), "calcIBS": Decimal("0"), "xmlCBS": Decimal("0"), "xmlIBS": Decimal("0")}
-    for n in notas:
-        for k, v in n.get("contagem", {}).items():
-            geral[k] = geral.get(k, 0) + v
-        for k in tot:
-            tot[k] += _dec(n.get("totais", {}).get(k))
-    return {
-        "resumo": {"notas": len(notas), "comErroLeitura": sum(1 for n in notas if "erro" in n), "itens": sum(geral.values()), "porStatus": geral},
-        "totais": {k: f"{v:.2f}" for k, v in tot.items()},
-        "avisos": sorted({a for n in notas for a in n.get("avisos", [])}),
-        "notas": notas,
-    }
+        def avancou(qtd: int) -> None:
+            with trava:
+                feito[0] += qtd
+                notificar({"e": "prog", "feito": feito[0]})
+
+        def trabalhar(par: tuple[str, dict[str, Any] | str]) -> dict[str, Any]:
+            nome, nota = par
+            if isinstance(nota, str):
+                return {"arquivo": nome, "erro": nota}
+            r = _processar_nota(nota, cAtivSN.zfill(2), aliq_sn, tol, avancou)
+            return {"arquivo": nome, **{k: nota[k] for k in ("chave", "mod", "nNF", "dhEmi", "emitente", "crt")}, **r}
+
+        with ThreadPoolExecutor(max_workers=WORKERS) as pool:
+            notas = list(pool.map(trabalhar, lidas))
+
+        geral: dict[str, int] = {}
+        tot = {"calcCBS": Decimal("0"), "calcIBS": Decimal("0"), "xmlCBS": Decimal("0"), "xmlIBS": Decimal("0")}
+        for n in notas:
+            for k, v in n.get("contagem", {}).items():
+                geral[k] = geral.get(k, 0) + v
+            for k in tot:
+                tot[k] += _dec(n.get("totais", {}).get(k))
+        return {
+            "resumo": {"notas": len(notas), "comErroLeitura": sum(1 for n in notas if "erro" in n), "itens": sum(geral.values()), "porStatus": geral},
+            "totais": {k: f"{v:.2f}" for k, v in tot.items()},
+            "avisos": sorted({a for n in notas for a in n.get("avisos", [])}),
+            "notas": notas,
+        }
+
+    return _responder(trabalho, progresso)

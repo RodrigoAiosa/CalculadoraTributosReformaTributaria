@@ -76,12 +76,12 @@ def test_importa_e_totaliza(monkeypatch):
     assert [i["linha"] for i in j["itens"]] == [2, 3]
 
 
-def test_divide_em_blocos_de_100(monkeypatch):
+def test_divide_em_blocos_de_50(monkeypatch):
     corpos = motor(monkeypatch)
     r = enviar(xlsx([["NCM", "22030000", "x", "000", "000001", 10.0, None, None]] * 250))
     j = r.json()
-    assert r.status_code == 200 and j["resumo"]["blocos"] == 3 and j["resumo"]["produtos"] == 250
-    assert sorted(len(c["itens"]) for c in corpos) == [50, 100, 100]
+    assert r.status_code == 200 and j["resumo"]["blocos"] == 5 and j["resumo"]["produtos"] == 250
+    assert sorted(len(c["itens"]) for c in corpos) == [50] * 5
     assert all([i["numero"] for i in c["itens"]] == list(range(1, len(c["itens"]) + 1)) for c in corpos)  # renumerado por bloco
     assert [i["linha"] for i in j["itens"]] == list(range(2, 252))  # ordem original preservada
 
@@ -147,3 +147,31 @@ def test_modelo_baixavel_e_reimportavel(monkeypatch):
     ws = load_workbook(io.BytesIO(r.content)).active
     assert [c.value for c in ws[1]][:2] == ["Tipo", "NCM / NBS"]
     assert enviar(r.content).status_code == 200  # o modelo passa na própria validação
+
+
+def test_progresso_transmite_eventos_ndjson(monkeypatch):
+    import json as _json
+    motor(monkeypatch)
+    r = client.post("/api/regime-geral/importar", data={**CAMPOS, "progresso": "1"},
+                    files={"arquivo": ("p.xlsx", xlsx([["NCM", "22030000", "x", "000", "000001", 10.0, None, None]] * 120), "application/octet-stream")})
+    assert r.status_code == 200 and r.headers["content-type"].startswith("application/x-ndjson")
+    ev = [_json.loads(l) for l in r.text.splitlines() if l.strip()]
+    assert ev[0] == {"e": "inicio", "total": 120}
+    feitos = [e["feito"] for e in ev if e["e"] == "prog"]
+    assert feitos == sorted(feitos) and feitos[-1] == 120 and len(feitos) == 3     # 50 + 50 + 20
+    assert ev[-1]["e"] == "fim" and ev[-1]["dados"]["resumo"]["produtos"] == 120
+
+
+def test_progresso_erro_do_motor_vira_evento(monkeypatch):
+    import json as _json
+    monkeypatch.setattr(index, "_client", lambda: httpx.Client(transport=httpx.MockTransport(lambda req: httpx.Response(422, json={"title": "x"}))))
+    r = client.post("/api/regime-geral/importar", data={**CAMPOS, "progresso": "1"},
+                    files={"arquivo": ("p.xlsx", xlsx([["NCM", "22030000", "x", "000", "000001", 10.0, None, None]]), "application/octet-stream")})
+    ev = [_json.loads(l) for l in r.text.splitlines() if l.strip()]
+    assert ev[-1]["e"] == "erro" and ev[-1]["status"] == 422
+
+
+def test_progresso_validacao_continua_http_normal(monkeypatch):
+    motor(monkeypatch)
+    r = client.post("/api/regime-geral/importar", data={**CAMPOS, "progresso": "1"}, files={"arquivo": ("p.xlsx", b"nao e xlsx", "application/octet-stream")})
+    assert r.status_code == 422 and "xlsx" in str(r.json()["detail"]).lower()

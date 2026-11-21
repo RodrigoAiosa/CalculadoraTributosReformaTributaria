@@ -80,10 +80,10 @@ def test_importa_formata_campos_como_texto_e_totaliza(monkeypatch):
     assert j["avisos"] == ["aviso x"]
 
 
-def test_blocos_de_100(monkeypatch):
+def test_blocos_de_50(monkeypatch):
     corpos = motor(monkeypatch)
     r = enviar(xlsx([["NCM", "22030000", "x", "01", "000001", 10.0, None]] * 230))
-    assert r.json()["resumo"]["blocos"] == 3 and sorted(len(c["itens"]) for c in corpos) == [30, 100, 100]
+    assert r.json()["resumo"]["blocos"] == 5 and sorted(len(c["itens"]) for c in corpos) == [30, 50, 50, 50, 50]
 
 
 def test_item_com_erro_fica_fora_dos_totais(monkeypatch):
