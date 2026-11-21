@@ -1,5 +1,7 @@
 """Gera XMLs de NF-e de exemplo (ambiente de homologação, sem valor fiscal) para testar /api/xml/importar.
 
+Os valores de tools/valores-exemplo-xml.json são os que o motor oficial calculou (conferidos ao vivo).
+
 Uso:
     python tools/gerar_xml_exemplo.py <saida.zip> [--valores valores.json]
 
