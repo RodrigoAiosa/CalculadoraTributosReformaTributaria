@@ -265,7 +265,7 @@ function renderRegular(res) {
   }).join("");
   const t = r.total?.tribCalc || {};
   return `<div class="card">
-    ${res.aviso ? `<div class="status warn">Aviso do motor: ${esc(res.aviso)}</div>` : ""}
+    ${res.aviso ? `<div class="status warn">Cálculo simulado (aviso do motor: ${esc(res.aviso)})</div>` : ""}
     <table><thead><tr><th>Item</th><th>Estado</th><th class="num">Base</th><th class="num">CBS</th><th class="num">IBS</th><th class="num">IS</th></tr></thead><tbody>${rows}</tbody>
     <tfoot><tr><th colspan="2">Total (só itens calculados)</th><th class="num">${esc(t.IBSCBSTot?.vBCIBSCBS ?? "")}</th><th class="num">${esc(t.IBSCBSTot?.gCBS?.vCBS ?? "")}</th><th class="num">${esc(t.IBSCBSTot?.gIBS?.vIBS ?? "")}</th><th class="num">${esc(t.ISTot?.vIS ?? "")}</th></tr></tfoot></table>
     <details><summary>Resposta completa (com memória de cálculo)</summary><pre>${esc(JSON.stringify(r, null, 2))}</pre></details></div>`;
@@ -273,11 +273,19 @@ function renderRegular(res) {
 function renderSimples(res) {
   const r = res.resultado || {};
   const lista = r.objetos || r.itens || [];
-  const rows = lista.map((o) => itemRow(o, `<td><details><summary>detalhe</summary><pre>${esc(JSON.stringify(o, null, 2))}</pre></details></td>`)).join("");
+  let totalCents = 0, temTotal = false;
+  const rows = lista.map((o) => {
+    const t = o.tribCalc || {};
+    if (o.estadoItem === "CALCULADO" && t.totalItem != null) { totalCents += Math.round(Number(t.totalItem) * 100); temTotal = true; }
+    const aliq = (r.resolucaoAliquotas?.itens || []).find((i) => i.numero === o.nObj);
+    const avisos = (aliq?.avisos || []).map((a) => `<div class="hint">${esc(typeof a === "string" ? a : JSON.stringify(a))}</div>`).join("");
+    return itemRow(o, `<td class="num">${esc(t.vBC ?? "")}</td><td class="num">${esc(t.vCBSSN ?? "")}${t.pCBSSN ? `<div class="hint">${esc(t.pCBSSN)}%</div>` : ""}</td><td class="num">${esc(t.vIBSSN ?? "")}${t.pIBSSN ? `<div class="hint">${esc(t.pIBSSN)}%</div>` : ""}</td><td class="num">${esc(t.IS?.valor ?? "")}</td><td class="num">${esc(t.totalItem ?? "")}</td>`).replace("</td></tr>", `${avisos}</td></tr>`);
+  }).join("");
   const erroGlobal = r.erros ? `<ul class="errs">${r.erros.map((e) => `<li><b>${esc(e.code)}</b> ${esc(e.title)} — ${esc(e.detail)}</li>`).join("")}</ul>` : "";
   return `<div class="card">${erroGlobal}
-    ${rows ? `<table><thead><tr><th>Item</th><th>Estado</th><th>Cálculo</th></tr></thead><tbody>${rows}</tbody></table>` : ""}
-    <details ${rows ? "" : "open"}><summary>Resposta completa</summary><pre>${esc(JSON.stringify(r, null, 2))}</pre></details></div>`;
+    ${rows ? `<table><thead><tr><th>Item</th><th>Estado</th><th class="num">Base</th><th class="num">CBS (alíq. efetiva)</th><th class="num">IBS (alíq. efetiva)</th><th class="num">IS</th><th class="num">Total</th></tr></thead><tbody>${rows}</tbody>
+    ${temTotal ? `<tfoot><tr><th colspan="6">Total (só itens calculados)</th><th class="num">${(totalCents / 100).toFixed(2)}</th></tr></tfoot>` : ""}</table>` : ""}
+    <details ${rows ? "" : "open"}><summary>Resposta completa (com memória de cálculo)</summary><pre>${esc(JSON.stringify(r, null, 2))}</pre></details></div>`;
 }
 
 async function run(btn, out, build, url, render) {
