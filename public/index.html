@@ -76,7 +76,7 @@
   <section id="p-regular">
     <div class="card">
       <div class="grid">
-        <div><label>Data/hora do fato gerador</label><input id="r-dh" value="2027-03-10T10:00:00-03:00"></div>
+        <div><label>Data do fato gerador</label><input id="r-dh" value="10/03/2027" placeholder="dd/mm/aaaa" inputmode="numeric" maxlength="10" autocomplete="off"></div>
         <div><label>UF</label><input id="r-uf" value="RS" maxlength="2"></div>
         <div><label>Município (código IBGE)</label><input id="r-mun" value="4314902" inputmode="numeric"></div>
       </div>
@@ -236,7 +236,7 @@ const readRows = (tableId) => [...$(tableId).tBodies[0].rows].map((tr) => {
 // ---------- exemplos (ilustrativos; vêm da documentação dos motores) ----------
 $("r-add").onclick = () => { rowRegular({ numero: $("r-table").tBodies[0].rows.length + 1, cst: "000" }); };
 $("r-example").onclick = () => {
-  $("r-dh").value = "2027-03-10T10:00:00-03:00"; $("r-uf").value = "RS"; $("r-mun").value = "4314902";
+  $("r-dh").value = "10/03/2027"; $("r-uf").value = "RS"; $("r-mun").value = "4314902";
   $("r-cbs").value = "8.8"; $("r-ibsuf").value = "0.05"; $("r-ibsmun").value = "0.05"; $("r-json").value = "";
   $("r-table").tBodies[0].innerHTML = "";
   rowRegular({ numero: 1, tipo: "NCM", codigo: "10063021", cst: "200", cClassTrib: "200003", baseCalculo: "100.00", quantidade: "20", unidade: "KG" });
@@ -250,13 +250,25 @@ $("s-example").onclick = () => {
   $("s-aliq").value = JSON.stringify({ anexoI: { pCBSSN: "1.1612", pIBSSN: "0.0129" } }, null, 2);
 };
 
+// data dd/mm/aaaa -> ISO com horário e fuso de Brasília (o motor exige data/hora)
+function dhIso() {
+  const m = $("r-dh").value.trim().match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  const d = m && new Date(`${m[3]}-${m[2]}-${m[1]}T12:00:00Z`);
+  if (!m || isNaN(d) || d.getUTCDate() !== Number(m[1])) throw new Error("Data do fato gerador inválida: use dd/mm/aaaa (ex.: 10/03/2027).");
+  return `${m[3]}-${m[2]}-${m[1]}T10:00:00-03:00`;
+}
+$("r-dh").addEventListener("input", (e) => {  // máscara dd/mm/aaaa enquanto digita
+  const d = e.target.value.replace(/\D/g, "").slice(0, 8);
+  e.target.value = d.length > 4 ? `${d.slice(0, 2)}/${d.slice(2, 4)}/${d.slice(4)}` : d.length > 2 ? `${d.slice(0, 2)}/${d.slice(2)}` : d;
+});
+
 // ---------- payloads ----------
 function payloadRegular() {
   const num = (s) => (s === "" ? undefined : Number(s.replace(",", ".")));
   const aliq = {}; const c = num($("r-cbs").value), u = num($("r-ibsuf").value), m = num($("r-ibsmun").value);
   if (c !== undefined) aliq.cbs = c; if (u !== undefined) aliq.ibsEstadual = u; if (m !== undefined) aliq.ibsMunicipal = m;
   return {
-    dhFatoGerador: $("r-dh").value.trim(), municipio: Number($("r-mun").value), uf: $("r-uf").value.trim().toUpperCase(),
+    dhFatoGerador: dhIso(), municipio: Number($("r-mun").value), uf: $("r-uf").value.trim().toUpperCase(),
     itens: readRows("r-table").map((r) => {
       const it = { numero: Number(r.numero), cst: r.cst, cClassTrib: r.cClassTrib, baseCalculo: num(r.baseCalculo) };
       if (r.codigo) it[r.tipo.toLowerCase()] = r.codigo;
@@ -380,7 +392,8 @@ $("r-import").onclick = async () => {
   const out = $("r-out"), btn = $("r-import"), f = $("r-file").files[0];
   if (!f) { out.innerHTML = `<div class="card"><div class="status err">Escolha um arquivo .xlsx primeiro (ou baixe o modelo).</div></div>`; return; }
   const fd = new FormData(); fd.append("arquivo", f);
-  fd.append("dhFatoGerador", $("r-dh").value.trim()); fd.append("municipio", $("r-mun").value.trim()); fd.append("uf", $("r-uf").value.trim().toUpperCase());
+  let dh; try { dh = dhIso(); } catch (e) { out.innerHTML = `<div class="card"><div class="status err">${esc(e.message)}</div></div>`; return; }
+  fd.append("dhFatoGerador", dh); fd.append("municipio", $("r-mun").value.trim()); fd.append("uf", $("r-uf").value.trim().toUpperCase());
   [["cbs", "r-cbs"], ["ibsEstadual", "r-ibsuf"], ["ibsMunicipal", "r-ibsmun"]].forEach(([k, id]) => { if ($(id).value.trim()) fd.append(k, $(id).value.trim()); });
   out.innerHTML = ""; btn.disabled = true; btn.textContent = "Calculando… (arquivos grandes e motor dormindo podem levar alguns minutos)";
   try {
