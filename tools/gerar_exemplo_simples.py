@@ -6,7 +6,7 @@ Uso:
 Reaproveita a seleção de NCM/cClassTrib de gerar_exemplo.py (pares que a base declara aplicáveis, mais a
 classificação genérica 000001) e acrescenta o cAtivSN. Atividades 01 e 02 (Anexo I, mercadorias) são as
 admitidas na NF-e/NFC-e que usam um único anexo; o exemplo usa só o Anexo I, então as alíquotas efetivas são
-{"anexoI": {...}}. `--excluir` lista 'TIPO|codigo|cAtivSN|cClassTrib' a descartar depois de validar no motor.
+{"anexoI": {...}}. `--excluir` lista 'TIPO|codigo|cAtivSN|cClassTrib' (cAtivSN pode ser *) a descartar depois de validar no motor.
 """
 
 import argparse
@@ -22,6 +22,8 @@ from openpyxl.styles import Font
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from gerar_exemplo import amostrar, carregar  # noqa: E402
 
+# cClassTrib que o motor recusa para o tpDoc 55 (VSN-022), validado no motor real
+CLASSES_FORA = {"200044"}
 ATIVIDADES = ["01"] * 7 + ["02"] * 3  # 70% revenda/industrializadas, 30% demais bens materiais
 
 
@@ -42,8 +44,9 @@ def main():
     linhas = []
     for tipo, cod, desc, cc in cand:
         ativ = rnd.choice(ATIVIDADES)
-        if "|".join([tipo, cod, ativ, cc]) not in excl:
-            linhas.append((tipo, cod, desc, ativ, cc))
+        if cc in CLASSES_FORA or "|".join([tipo, cod, ativ, cc]) in excl or "|".join([tipo, cod, "*", cc]) in excl:
+            continue
+        linhas.append((tipo, cod, desc, ativ, cc))
     final = linhas[: a.n]
     rnd.shuffle(final)
 
