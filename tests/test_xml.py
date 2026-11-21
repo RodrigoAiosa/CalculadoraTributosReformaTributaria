@@ -81,7 +81,7 @@ def test_envia_aliquotas_e_data_do_xml_ao_motor(monkeypatch, exemplo):
     host, corpo = ch[0]
     assert host == "regular.test" and corpo["uf"] == "SP" and corpo["municipio"] == 3550308 and corpo["dhFatoGerador"].startswith("2027-03-10")
     assert corpo["itens"][0]["aliquotasNominais"] == {"cbs": 0.9, "ibsEstadual": 0.05, "ibsMunicipal": 0.05}
-    assert corpo["itens"][0]["cst"] == "000" and corpo["itens"][0]["ncm"] == "22030000"
+    assert corpo["itens"][0]["cst"] == "000" and corpo["itens"][0]["ncm"] == "84191100"
 
 
 def test_confere_e_divergente(monkeypatch, tmp_path):
