@@ -3,179 +3,323 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
 <title>Calculadora CBS/IBS — Reforma Tributária</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-  :root { --bg:#f6f7f9; --card:#fff; --ink:#1b2430; --mute:#5d6b7c; --line:#dde2e9; --accent:#0b5cad; --ok:#117a3d; --warn:#9a5b00; --err:#b3261e; }
-  * { box-sizing: border-box; }
-  body { margin:0; font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--ink); }
-  header { background:var(--accent); color:#fff; padding:18px 24px; }
-  header h1 { margin:0; font-size:20px; }
-  header p { margin:4px 0 0; opacity:.9; font-size:13px; }
-  main { max-width:1100px; margin:20px auto; padding:0 16px 48px; }
-  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:16px; }
-  .tabs { display:flex; gap:8px; margin-bottom:16px; }
-  .tabs button { padding:8px 16px; border:1px solid var(--line); background:#fff; border-radius:8px; cursor:pointer; font-size:14px; }
-  .tabs button.on { background:var(--accent); color:#fff; border-color:var(--accent); }
-  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:12px; }
-  label { display:block; font-size:12px; color:var(--mute); margin-bottom:3px; }
-  input, select, textarea { width:100%; padding:7px 8px; border:1px solid var(--line); border-radius:6px; font:inherit; background:#fff; }
-  textarea { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12.5px; }
-  table { width:100%; border-collapse:collapse; font-size:13px; }
-  th { text-align:left; font-weight:600; color:var(--mute); padding:4px 4px; font-size:12px; }
-  td { padding:3px 3px; vertical-align:top; }
-  td input, td select { padding:5px 6px; }
-  .items-wrap { overflow-x:auto; }
-  .row-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; align-items:center; }
-  button.btn { padding:8px 14px; border-radius:8px; border:1px solid var(--line); background:#fff; cursor:pointer; font-size:14px; }
+  :root {
+    --paper:#F4F5F8; --surface:#FFFFFF; --ink:#11151C; --mute:#586172; --line:#E2E5EB; --line-strong:#C6CCD7;
+    --accent:#3441E0; --accent-dark:#2A35B8; --accent-tint:#EEF0FE;
+    --ok:#0B7547; --ok-tint:#E3F3EA; --warn:#8A5200; --warn-tint:#FFF0D6; --err:#B42318; --err-tint:#FDE9E7;
+    --font:"Instrument Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --r-lg:14px; --r-md:10px; --r-sm:8px;
+  }
+  *, *::before, *::after { box-sizing:border-box; }
+  [hidden] { display:none !important; }
+  html { -webkit-text-size-adjust:100%; }
+  body { margin:0; font:400 15px/1.5 var(--font); color:var(--ink); background:var(--paper); }
+  :focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  a { color:var(--accent); }
+
+  /* ---------- barra superior ---------- */
+  .top { background:var(--surface); border-bottom:1px solid var(--line); }
+  .top-in { max-width:1160px; margin:0 auto; padding:14px 24px; display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; }
+  .brand { font-size:17px; font-weight:700; letter-spacing:-.01em; }
+  .brand span { color:var(--accent); }
+  #motores { display:inline-flex; align-items:center; gap:8px; font-size:13px; font-weight:500; color:var(--mute); margin:0; }
+  #motores::before { content:""; width:8px; height:8px; border-radius:50%; background:var(--line-strong); }
+  #motores[data-s="ok"]::before { background:var(--ok); }
+  #motores[data-s="wait"]::before { background:#E2A100; animation:pulso 1.4s ease-in-out infinite; }
+  #motores[data-s="off"]::before { background:var(--err); }
+  @keyframes pulso { 50% { opacity:.35; } }
+
+  main { max-width:1160px; margin:0 auto; padding:28px 24px 56px; }
+  .intro { margin:0 0 18px; color:var(--mute); max-width:62ch; }
+
+  /* ---------- abas ---------- */
+  .tabs { display:inline-flex; gap:2px; padding:4px; background:#E7E9EF; border-radius:12px; margin-bottom:24px; max-width:100%; overflow-x:auto; }
+  .tabs button { padding:9px 16px; border:0; background:transparent; border-radius:9px; cursor:pointer; font:500 14px var(--font); color:var(--mute); white-space:nowrap; }
+  .tabs button:hover { color:var(--ink); }
+  .tabs button.on { background:var(--surface); color:var(--ink); font-weight:600; box-shadow:0 0 0 1px var(--line); }
+
+  /* ---------- estrutura: parâmetros | tarefa ---------- */
+  .work { display:grid; grid-template-columns:minmax(260px,320px) minmax(0,1fr); gap:24px; align-items:start; }
+  .rail { background:var(--surface); border:1px solid var(--line); border-radius:var(--r-lg); padding:20px; position:sticky; top:16px; }
+  .rail h2, .block-title { margin:0 0 14px; font-size:16px; font-weight:650; letter-spacing:-.005em; }
+  .rail .field + .field { margin-top:14px; }
+  .main { display:grid; grid-template-columns:minmax(0,1fr); gap:16px; min-width:0; }
+  #r-out, #s-out, #x-out { display:grid; grid-template-columns:minmax(0,1fr); gap:16px; min-width:0; }
+  #r-out:empty, #s-out:empty, #x-out:empty { display:none; }
+  label { display:block; font-size:13px; font-weight:500; color:var(--ink); margin-bottom:5px; }
+  label small { font-weight:400; color:var(--mute); }
+  input, select, textarea { width:100%; height:40px; padding:0 12px; border:1px solid var(--line-strong); border-radius:var(--r-sm); font:inherit; font-size:14.5px; color:var(--ink); background:var(--surface); }
+  input:hover, select:hover, textarea:hover { border-color:#9AA3B2; }
+  input:focus-visible, select:focus-visible, textarea:focus-visible { outline:2px solid var(--accent); outline-offset:0; border-color:var(--accent); }
+  textarea { height:auto; padding:10px 12px; font-family:var(--mono); font-size:12.5px; line-height:1.5; resize:vertical; }
+  input[type=file] { height:auto; padding:0; border:0; }
+  .hint { font-size:12.5px; color:var(--mute); margin:6px 0 0; line-height:1.45; }
+  .pair { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+
+  /* ---------- área de arquivo (destaque da tela) ---------- */
+  .drop { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; min-height:176px; padding:24px; text-align:center; cursor:pointer;
+          background:var(--surface); border:1.5px dashed var(--line-strong); border-radius:var(--r-lg); transition:border-color .15s, background-color .15s; }
+  .drop:hover, .drop.over { border-color:var(--accent); background:var(--accent-tint); }
+  .drop:focus-within { outline:2px solid var(--accent); outline-offset:2px; }
+  .drop input { position:absolute; width:1px; height:1px; opacity:0; overflow:hidden; }
+  .drop svg { width:30px; height:30px; color:var(--accent); margin-bottom:6px; }
+  .drop strong { font-size:17px; font-weight:650; }
+  .drop .sub { color:var(--mute); font-size:14px; }
+  .drop .fname { display:none; margin-top:10px; padding:4px 12px; border-radius:99px; background:var(--accent-tint); color:var(--accent-dark); font:500 13px var(--font); max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .drop.has .fname { display:inline-block; }
+  .drop.has { border-style:solid; border-color:var(--accent); background:var(--accent-tint); }
+  .upload-box { display:grid; gap:12px; }
+  .actions { display:flex; gap:16px 20px; flex-wrap:wrap; align-items:center; }
+  .reqs { margin:0; font-size:13px; color:var(--mute); }
+  .reqs b { color:var(--ink); font-weight:600; }
+
+  /* ---------- botões ---------- */
+  button.btn, a.btn { display:inline-flex; align-items:center; justify-content:center; min-height:44px; padding:0 20px; border-radius:var(--r-md); border:1px solid var(--line-strong); background:var(--surface); color:var(--ink);
+                      font:600 14.5px var(--font); cursor:pointer; text-decoration:none; transition:background-color .12s, border-color .12s; }
+  button.btn:hover, a.btn:hover { border-color:#8E97A8; background:#FAFBFC; }
   button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
-  button:disabled { opacity:.6; cursor:wait; }
-  .del { border:none; background:none; color:var(--err); cursor:pointer; font-size:16px; }
-  .pill { display:inline-block; padding:2px 8px; border-radius:99px; font-size:12px; font-weight:600; }
-  .pill.ok { background:#e3f4ea; color:var(--ok); } .pill.sim { background:#fff1d6; color:var(--warn); }
-  .pill.err { background:#fde8e6; color:var(--err); } .pill.neutral { background:#eceff3; color:var(--mute); }
-  .status { margin:8px 0; font-size:13px; }
-  .status.err { color:var(--err); } .status.warn { color:var(--warn); }
+  button.primary:hover { background:var(--accent-dark); border-color:var(--accent-dark); }
+  button.btn.quiet, a.quiet { min-height:36px; padding:0 12px; border-color:transparent; background:transparent; color:var(--accent); font-weight:500; }
+  button.btn.quiet:hover, a.quiet:hover { background:var(--accent-tint); border-color:transparent; }
+  a.link { font-size:14px; font-weight:500; text-decoration:none; }
+  a.link:hover { text-decoration:underline; }
+  button:disabled { cursor:progress; }
+  button.primary:disabled { background:var(--accent-dark); border-color:var(--accent-dark); color:#fff; background-image:linear-gradient(110deg,transparent 30%,rgba(255,255,255,.22) 50%,transparent 70%); background-size:220% 100%; animation:varre 1.4s linear infinite; }
+  @keyframes varre { from { background-position:120% 0; } to { background-position:-120% 0; } }
+  .del { border:0; background:none; color:var(--err); cursor:pointer; font-size:18px; width:32px; height:32px; border-radius:var(--r-sm); }
+  .del:hover { background:var(--err-tint); }
+
+  /* ---------- blocos ---------- */
+  .card { background:var(--surface); border:1px solid var(--line); border-radius:var(--r-lg); padding:20px; }
+  details.card { padding:0; }
+  details.card > summary { padding:16px 20px; font-weight:600; font-size:14.5px; color:var(--ink); }
+  details.card > .in { padding:0 20px 20px; }
+  details > summary { cursor:pointer; list-style:none; display:flex; align-items:center; gap:8px; color:var(--accent); font-size:14px; font-weight:500; }
+  details > summary::-webkit-details-marker { display:none; }
+  details > summary::before { content:""; width:7px; height:7px; border-right:2px solid currentColor; border-bottom:2px solid currentColor; transform:rotate(-45deg); transition:transform .15s; margin-right:2px; }
+  details[open] > summary::before { transform:rotate(45deg); }
+  details details { margin-top:12px; }
+  .row-actions { display:flex; gap:10px; flex-wrap:wrap; margin-top:14px; align-items:center; }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; }
+  .chips span { margin:0; }
+
+  /* ---------- tabelas ---------- */
+  table { width:100%; border-collapse:collapse; font-size:13.5px; }
+  th { text-align:left; font-weight:600; color:var(--mute); padding:8px 10px; font-size:12.5px; border-bottom:1px solid var(--line); white-space:nowrap; }
+  td { padding:9px 10px; vertical-align:top; border-bottom:1px solid #EEF0F4; }
+  tbody tr:hover td { background:#FAFBFD; }
+  tfoot th { border-top:1px solid var(--line-strong); border-bottom:0; color:var(--ink); }
   .num { text-align:right; font-variant-numeric:tabular-nums; }
-  details { margin-top:10px; } summary { cursor:pointer; color:var(--accent); font-size:13px; }
-  pre { background:#0f1722; color:#d6e2f0; padding:12px; border-radius:8px; overflow:auto; font-size:12px; max-height:380px; }
-  a.btn { text-decoration:none; color:inherit; display:inline-block; padding:8px 14px; border-radius:8px; border:1px solid var(--line); background:#fff; font-size:14px; }
-  details.card > summary { font-size:14px; }
-  .chips span { margin-right:6px; }
-  .scroll { max-height:520px; overflow:auto; }
-  .hint { font-size:12px; color:var(--mute); margin:6px 0 0; }
-  .errs { margin:4px 0 0; padding-left:18px; color:var(--err); font-size:12.5px; }
+  .items-wrap { overflow-x:auto; margin:0 -4px; }
+  .scroll { max-height:520px; overflow:auto; border:1px solid var(--line); border-radius:var(--r-md); }
+  .scroll thead th { position:sticky; top:0; background:var(--surface); z-index:1; }
+  .scroll table { border-collapse:separate; border-spacing:0; }
+  td input, td select { height:34px; padding:0 8px; font-size:13.5px; }
+  td select { min-width:76px; padding-right:2px; }
+
+  /* ---------- situação ---------- */
+  .pill { display:inline-flex; align-items:center; gap:6px; padding:2px 10px 2px 8px; border-radius:99px; font-size:12.5px; font-weight:600; line-height:1.5; }
+  .pill::before { content:""; width:6px; height:6px; border-radius:50%; background:currentColor; }
+  .pill.ok { background:var(--ok-tint); color:var(--ok); } .pill.sim { background:var(--warn-tint); color:var(--warn); }
+  .pill.err { background:var(--err-tint); color:var(--err); } .pill.neutral { background:#ECEEF3; color:var(--mute); }
+  .status { margin:10px 0; padding:10px 14px; border-radius:var(--r-md); font-size:13.5px; background:#ECEEF3; }
+  .status.err { background:var(--err-tint); color:var(--err); } .status.warn { background:var(--warn-tint); color:var(--warn); }
+  .status.wait { display:flex; gap:10px; align-items:center; background:var(--accent-tint); color:var(--accent-dark); }
+  .status.wait::before { content:""; width:14px; height:14px; border-radius:50%; border:2px solid currentColor; border-right-color:transparent; animation:gira .8s linear infinite; flex:none; }
+  @keyframes gira { to { transform:rotate(360deg); } }
+  .errs { margin:6px 0 0; padding-left:18px; color:var(--err); font-size:13px; }
+
+  /* ---------- resultado: faixa de totais ---------- */
+  .kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:1px; background:var(--line); border:1px solid var(--line); border-radius:var(--r-md); overflow:hidden; margin:14px 0; }
+  .kpis > div { background:var(--surface); padding:14px 16px; }
+  .kpis label { margin:0 0 2px; font-size:13px; font-weight:400; color:var(--mute); }
+  .kpis b { display:block; font-size:24px; font-weight:650; letter-spacing:-.02em; font-variant-numeric:tabular-nums; }
+  .res-title { font-size:16px; font-weight:650; }
+  pre { background:#12161F; color:#DCE4F2; padding:14px; border-radius:var(--r-md); overflow:auto; font:12px/1.55 var(--mono); max-height:380px; }
+  code { font-family:var(--mono); font-size:.92em; background:#ECEEF3; padding:1px 5px; border-radius:5px; }
+  #r-out .scroll td:nth-child(2), #s-out .scroll td:nth-child(2) { white-space:nowrap; }
+
+  footer { max-width:1160px; margin:0 auto; color:var(--mute); font-size:12.5px; padding:0 24px 40px; }
+
+  /* ---------- telas menores ---------- */
+  @media (max-width:900px) {
+    .work { grid-template-columns:minmax(0,1fr); }
+    .rail { position:static; }
+  }
   @media (max-width:640px) {
-    .items-wrap { overflow-x:visible; }
+    .top-in, main, footer { padding-left:16px; padding-right:16px; }
+    main { padding-top:20px; }
+    .tabs { display:flex; width:100%; }
+    .tabs button { flex:1; padding:9px 6px; font-size:13px; text-align:center; }
+    .drop { min-height:152px; padding:20px 16px; }
+    .items-wrap { overflow-x:visible; margin:0; }
     table.stack thead { display:none; }
     table.stack, table.stack tbody { display:block; }
-    table.stack tr { display:grid; grid-template-columns:1fr 1fr; gap:8px 10px; border:1px solid var(--line); border-radius:8px; padding:10px; margin-bottom:10px; position:relative; }
-    table.stack td { display:block; width:auto !important; padding:0; }
-    table.stack td::before { content:attr(data-label); display:block; font-size:11px; color:var(--mute); margin-bottom:2px; }
+    table.stack tr { display:grid; grid-template-columns:1fr 1fr; gap:8px 10px; border:1px solid var(--line); border-radius:var(--r-md); padding:12px; margin-bottom:10px; position:relative; }
+    table.stack td { display:block; width:auto !important; padding:0; border:0; }
+    table.stack td::before { content:attr(data-label); display:block; font-size:12px; color:var(--mute); margin-bottom:2px; }
     table.stack td:last-child { position:absolute; top:4px; right:6px; }
     table.stack td:last-child::before { content:none; }
-    table.stack td input, table.stack td select { font-size:16px; padding:8px; }
-    .grid { grid-template-columns:1fr; }
+    table.stack td input, table.stack td select { font-size:16px; height:40px; }
+    .kpis { grid-template-columns:1fr 1fr; }
+    .kpis b { font-size:20px; }
+    button.btn.primary { width:100%; }
   }
-  footer { text-align:center; color:var(--mute); font-size:12px; padding:0 16px 32px; }
+  @media (prefers-reduced-motion:reduce) { *, *::before, *::after { animation:none !important; transition:none !important; } }
 </style>
 </head>
 <body>
-<header>
-  <h1>Calculadora de CBS / IBS</h1>
-  <p>Cálculo feito pelos motores oficiais da Receita Federal (repositórios ReceitaFederal no GitHub). Resultado simulado, sem valor fiscal.</p>
-  <p id="motores" style="margin-top:8px">Motores: verificando…</p>
-</header>
+<header class="top"><div class="top-in">
+  <div class="brand">Calculadora <span>CBS/IBS</span></div>
+  <p id="motores" data-s="wait" role="status">Verificando os motores…</p>
+</div></header>
+
 <main>
-  <div class="tabs">
-    <button id="tab-regular" class="on" type="button">Regime regular</button>
-    <button id="tab-simples" type="button">Simples Nacional</button>
-    <button id="tab-xml" type="button">XML de NF-e</button>
+  <p class="intro">Cálculo feito pelos motores oficiais da Receita Federal. O resultado é simulado e não tem valor fiscal.</p>
+  <div class="tabs" role="tablist" aria-label="Tipo de cálculo">
+    <button id="tab-regular" class="on" type="button" role="tab" aria-selected="true">Regime regular</button>
+    <button id="tab-simples" type="button" role="tab" aria-selected="false">Simples Nacional</button>
+    <button id="tab-xml" type="button" role="tab" aria-selected="false">Notas em XML</button>
   </div>
 
   <!-- ===================== REGIME REGULAR ===================== -->
-  <section id="p-regular">
-    <div class="card">
-      <div class="grid">
-        <div><label>Data do fato gerador</label><input id="r-dh" value="10/03/2027" placeholder="dd/mm/aaaa" inputmode="numeric" maxlength="10" autocomplete="off"></div>
-        <div><label>UF</label><input id="r-uf" value="RS" maxlength="2"></div>
-        <div><label>Município (código IBGE)</label><input id="r-mun" value="4314902" inputmode="numeric"></div>
+  <section id="p-regular" class="work">
+    <aside class="rail">
+      <h2>Dados da operação</h2>
+      <div class="field"><label for="r-dh">Data do fato gerador</label><input id="r-dh" value="10/03/2027" placeholder="dd/mm/aaaa" inputmode="numeric" maxlength="10" autocomplete="off"></div>
+      <div class="pair field">
+        <div><label for="r-uf">UF</label><input id="r-uf" value="RS" maxlength="2" autocomplete="off"></div>
+        <div><label for="r-mun">Município <small>(IBGE)</small></label><input id="r-mun" value="4314902" inputmode="numeric" autocomplete="off"></div>
       </div>
-      <div class="grid" style="margin-top:12px">
-        <div><label>Alíquota CBS (%) — obrigatória a partir de 2027</label><input id="r-cbs" value="8.8"></div>
-        <div><label>Alíquota IBS estadual (%)</label><input id="r-ibsuf" value="0.05"></div>
-        <div><label>Alíquota IBS municipal (%)</label><input id="r-ibsmun" value="0.05"></div>
+      <div class="field"><label for="r-cbs">Alíquota CBS (%)</label><input id="r-cbs" value="8.8" inputmode="decimal"></div>
+      <div class="pair field">
+        <div><label for="r-ibsuf">IBS estadual (%)</label><input id="r-ibsuf" value="0.05" inputmode="decimal"></div>
+        <div><label for="r-ibsmun">IBS municipal (%)</label><input id="r-ibsmun" value="0.05" inputmode="decimal"></div>
       </div>
-      <p class="hint">As alíquotas acima são aplicadas a todos os itens. Antes de 2027 o motor <b>proíbe</b> informá-las: deixe os três campos em branco e use data de 2026.</p>
-    </div>
-    <div class="card" id="r-upload">
-      <b>Importar produtos (.xlsx)</b>
-      <p class="hint">Colunas obrigatórias: <b>Tipo</b> (NCM ou NBS), <b>NCM / NBS</b>, <b>CST</b>, <b>cClassTrib</b> e <b>Base de cálculo</b>. Opcionais: Descrição, Quantidade, Unidade. Até 5.000 produtos e 10 MB; o cálculo usa a data, UF, município e alíquotas acima.</p>
-      <input type="file" id="r-file" accept=".xlsx" style="margin-top:8px">
-      <div class="row-actions">
-        <button class="btn primary" type="button" id="r-import">Importar e calcular</button>
-        <a class="btn" href="/api/modelo.xlsx">Baixar modelo</a>
-        <a class="btn" href="/exemplos/produtos-1000.xlsx">Baixar exemplo com 1.000 produtos</a>
+      <p class="hint">Valem para todos os itens. A partir de 2027 as três alíquotas são obrigatórias; em 2026 o motor as proíbe, então deixe os campos em branco.</p>
+    </aside>
+    <div class="main">
+      <div class="upload-box" id="r-upload">
+        <label class="drop" for="r-file">
+          <input type="file" id="r-file" accept=".xlsx">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>
+          <strong>Escolha a planilha de produtos</strong>
+          <span class="sub">ou arraste o arquivo .xlsx para cá</span>
+          <span class="fname"></span>
+        </label>
+        <p class="reqs">Colunas obrigatórias: <b>Tipo</b>, <b>NCM / NBS</b>, <b>CST</b>, <b>cClassTrib</b> e <b>Base de cálculo</b>. Opcionais: Descrição, Quantidade e Unidade. Até 5.000 produtos e 10 MB.</p>
+        <div class="actions">
+          <button class="btn primary" type="button" id="r-import">Calcular planilha</button>
+          <a class="link" href="/api/modelo.xlsx">Baixar modelo</a>
+          <a class="link" href="/exemplos/produtos-1000.xlsx">Baixar exemplo com 1.000 produtos</a>
+        </div>
       </div>
-    </div>
-    <details class="card" id="r-manual">
-      <summary>Ou digite poucos itens manualmente</summary>
-      <div class="items-wrap" style="margin-top:10px"><table id="r-table" class="stack">
-        <thead><tr><th>Nº</th><th>Tipo</th><th>NCM / NBS</th><th>CST</th><th>cClassTrib</th><th>Base de cálculo</th><th>Qtd.</th><th>Unid.</th><th></th></tr></thead>
-        <tbody></tbody>
-      </table></div>
-      <div class="row-actions">
-        <button class="btn" type="button" id="r-add">+ Item</button>
-        <button class="btn" type="button" id="r-example">Preencher dados de teste</button>
-        <button class="btn primary" type="button" id="r-go">Calcular</button>
-      </div>
-      <details><summary>Editar JSON da operação (avançado: Imposto Seletivo, etc.)</summary>
-        <textarea id="r-json" rows="10" placeholder="Deixe vazio para usar o formulário"></textarea>
-        <div class="row-actions"><button class="btn" type="button" id="r-fill">Gerar JSON do formulário</button><span class="hint">Se esta caixa tiver conteúdo, ela é enviada no lugar do formulário.</span></div>
+      <details class="card" id="r-manual">
+        <summary>Digitar poucos itens manualmente</summary>
+        <div class="in">
+          <div class="items-wrap" style="margin-top:12px"><table id="r-table" class="stack">
+            <thead><tr><th>Nº</th><th>Tipo</th><th>NCM / NBS</th><th>CST</th><th>cClassTrib</th><th>Base de cálculo</th><th>Qtd.</th><th>Unid.</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table></div>
+          <div class="row-actions">
+            <button class="btn" type="button" id="r-add">Adicionar item</button>
+            <button class="btn quiet" type="button" id="r-example">Preencher dados de teste</button>
+            <button class="btn primary" type="button" id="r-go">Calcular</button>
+          </div>
+          <details><summary>Editar o JSON da operação (avançado)</summary>
+            <textarea id="r-json" rows="10" placeholder="Deixe vazio para usar o formulário" style="margin-top:10px"></textarea>
+            <div class="row-actions"><button class="btn" type="button" id="r-fill">Gerar JSON do formulário</button><span class="hint">Se esta caixa tiver conteúdo, ela é enviada no lugar do formulário. Use para informar Imposto Seletivo.</span></div>
+          </details>
+        </div>
       </details>
-    </details>
-    <div id="r-out"></div>
+      <div id="r-out" aria-live="polite"></div>
+    </div>
   </section>
 
   <!-- ===================== SIMPLES NACIONAL ===================== -->
-  <section id="p-simples" hidden>
-    <div class="card">
-      <div class="grid">
-        <div><label>Data do fato gerador</label><input id="s-data" value="2027-03-15" type="date"></div>
-        <div><label>Documento (tpDoc)</label>
-          <select id="s-tpdoc"><option value="55">55 — NF-e</option><option value="65">65 — NFC-e</option><option value="57">57 — CT-e</option><option value="67">67 — CT-e OS</option><option value="63">63 — BP-e</option><option value="93">93</option><option value="62">62</option><option value="91">91 — NFS-e</option></select></div>
-        <div><label>CRT (docs. exceto NFS-e)</label>
-          <select id="s-crt"><option value="1">1 — Simples Nacional</option><option value="2">2 — Excesso de sublimite</option><option value="3">3 — Regime normal</option><option value="4">4 — MEI</option></select></div>
-        <div><label>opSimpNac (só NFS-e)</label>
-          <select id="s-op"><option value="">—</option><option value="1">1 — Não optante</option><option value="2">2 — MEI</option><option value="3">3 — ME/EPP</option><option value="4">4 — Opção pendente</option></select></div>
-      </div>
-      <div style="margin-top:12px"><label>Alíquotas efetivas do contribuinte (JSON — linha da tabela do PGDAS, em pontos percentuais, como texto)</label>
+  <section id="p-simples" class="work" hidden>
+    <aside class="rail">
+      <h2>Dados da operação</h2>
+      <div class="field"><label for="s-data">Data do fato gerador</label><input id="s-data" value="2027-03-15" type="date"></div>
+      <div class="field"><label for="s-tpdoc">Documento</label>
+        <select id="s-tpdoc"><option value="55">55 — NF-e</option><option value="65">65 — NFC-e</option><option value="57">57 — CT-e</option><option value="67">67 — CT-e OS</option><option value="63">63 — BP-e</option><option value="93">93</option><option value="62">62</option><option value="91">91 — NFS-e</option></select></div>
+      <div class="field"><label for="s-crt">CRT <small>(exceto NFS-e)</small></label>
+        <select id="s-crt"><option value="1">1 — Simples Nacional</option><option value="2">2 — Excesso de sublimite</option><option value="3">3 — Regime normal</option><option value="4">4 — MEI</option></select></div>
+      <div class="field"><label for="s-op">opSimpNac <small>(só NFS-e)</small></label>
+        <select id="s-op"><option value="">—</option><option value="1">1 — Não optante</option><option value="2">2 — MEI</option><option value="3">3 — ME/EPP</option><option value="4">4 — Opção pendente</option></select></div>
+      <div class="field"><label for="s-aliq">Alíquotas efetivas <small>(JSON, em pontos percentuais)</small></label>
         <textarea id="s-aliq" rows="6"></textarea>
-        <p class="hint">Informe só o anexo usado pelos itens. Anexos III–V aceitam também <code>semRedistribuicaoISS</code>. Atividade 09 exige <code>fatorR</code>.</p></div>
-    </div>
-    <div class="card" id="s-upload">
-      <b>Importar produtos (.xlsx)</b>
-      <p class="hint">Colunas obrigatórias: <b>Tipo</b> (NCM ou NBS), <b>NCM / NBS</b>, <b>cAtivSN</b>, <b>cClassTrib</b> e <b>Base de cálculo</b>. Opcionais: Descrição e Valor IS (0,00 se vazio). Usa a data, o documento, o CRT e as alíquotas efetivas acima. Aceita documentos com CRT (NF-e, NFC-e, CT-e…); a NFS-e permite só 1 item por nota, então use a digitação manual. Até 5.000 produtos e 10 MB.</p>
-      <input type="file" id="s-file" accept=".xlsx" style="margin-top:8px">
-      <div class="row-actions">
-        <button class="btn primary" type="button" id="s-import">Importar e calcular</button>
-        <a class="btn" href="/api/modelo-simples.xlsx">Baixar modelo</a>
-        <a class="btn" href="/exemplos/simples-1000.xlsx">Baixar exemplo com 1.000 produtos</a>
+        <p class="hint">Informe só o anexo usado pelos itens, com a alíquota da tabela do PGDAS. Anexos III a V aceitam também <code>semRedistribuicaoISS</code>. A atividade 09 exige <code>fatorR</code>.</p></div>
+    </aside>
+    <div class="main">
+      <div class="upload-box" id="s-upload">
+        <label class="drop" for="s-file">
+          <input type="file" id="s-file" accept=".xlsx">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>
+          <strong>Escolha a planilha de produtos</strong>
+          <span class="sub">ou arraste o arquivo .xlsx para cá</span>
+          <span class="fname"></span>
+        </label>
+        <p class="reqs">Colunas obrigatórias: <b>Tipo</b>, <b>NCM / NBS</b>, <b>cAtivSN</b>, <b>cClassTrib</b> e <b>Base de cálculo</b>. Opcionais: Descrição e Valor IS (0,00 se vazio). Funciona com documentos que têm CRT (NF-e, NFC-e, CT-e…); para NFS-e, que aceita 1 item por nota, digite manualmente. Até 5.000 produtos e 10 MB.</p>
+        <div class="actions">
+          <button class="btn primary" type="button" id="s-import">Calcular planilha</button>
+          <a class="link" href="/api/modelo-simples.xlsx">Baixar modelo</a>
+          <a class="link" href="/exemplos/simples-1000.xlsx">Baixar exemplo com 1.000 produtos</a>
+        </div>
       </div>
+      <details class="card" id="s-manual">
+        <summary>Digitar poucos itens manualmente</summary>
+        <div class="in">
+          <div class="items-wrap" style="margin-top:12px"><table id="s-table" class="stack">
+            <thead><tr><th>Nº</th><th>cAtivSN</th><th>cClassTrib</th><th>Tipo</th><th>NCM / NBS</th><th>Base de cálculo</th><th>Valor IS</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table></div>
+          <div class="row-actions">
+            <button class="btn" type="button" id="s-add">Adicionar item</button>
+            <button class="btn quiet" type="button" id="s-example">Preencher dados de teste</button>
+            <button class="btn primary" type="button" id="s-go">Calcular</button>
+          </div>
+          <p class="hint">Documentos com CRT: base = vProd + vFrete + vSeg + vOutro − vDesc, sem IS. Informe o IS já calculado (0.00 se não houver).</p>
+        </div>
+      </details>
+      <div id="s-out" aria-live="polite"></div>
     </div>
-    <details class="card" id="s-manual">
-      <summary>Ou digite poucos itens manualmente</summary>
-      <div class="items-wrap" style="margin-top:10px"><table id="s-table" class="stack">
-        <thead><tr><th>Nº</th><th>cAtivSN</th><th>cClassTrib</th><th>Tipo</th><th>NCM / NBS</th><th>Base de cálculo</th><th>Valor IS</th><th></th></tr></thead>
-        <tbody></tbody>
-      </table></div>
-      <div class="row-actions">
-        <button class="btn" type="button" id="s-add">+ Item</button>
-        <button class="btn" type="button" id="s-example">Preencher dados de teste</button>
-        <button class="btn primary" type="button" id="s-go">Calcular</button>
-      </div>
-      <p class="hint">Documentos com CRT: base = vProd + vFrete + vSeg + vOutro − vDesc, sem IS; informe o IS já calculado (0.00 se não houver). Exemplo ilustrativo: ajuste ao seu caso.</p>
-    </details>
-    <div id="s-out"></div>
   </section>
 
-  <!-- ===================== XML DE NF-e ===================== -->
-  <section id="p-xml" hidden>
-    <div class="card">
-      <b>Conferir notas fiscais (XML)</b>
-      <p class="hint">Envie um ou mais XML de NF-e/NFC-e (modelos 55 e 65) ou um .zip com vários. A ferramenta lê data, município, itens, NCM, CST/cClassTrib e alíquotas da própria nota, calcula CBS/IBS no motor oficial e <b>compara com o que a nota destacou</b>. Notas de optantes do Simples (CRT 1, 2 e 4) precisam das alíquotas efetivas abaixo. Até 200 notas e 40 MB por envio.</p>
-      <input type="file" id="x-file" accept=".xml,.zip" multiple style="margin-top:8px">
-      <div class="grid" style="margin-top:12px">
-        <div><label>Tolerância (R$)</label><input id="x-tol" value="0.01"></div>
-        <div><label>cAtivSN (notas do Simples)</label><input id="x-ativ" value="01"></div>
+  <!-- ===================== NOTAS EM XML ===================== -->
+  <section id="p-xml" class="work" hidden>
+    <aside class="rail">
+      <h2>Conferência</h2>
+      <div class="field"><label for="x-tol">Tolerância <small>(R$)</small></label><input id="x-tol" value="0.01" inputmode="decimal"></div>
+      <div class="field"><label for="x-ativ">cAtivSN <small>(notas do Simples)</small></label><input id="x-ativ" value="01" maxlength="2"></div>
+      <div class="field"><label for="x-aliq">Alíquotas efetivas <small>(só notas do Simples)</small></label>
+        <textarea id="x-aliq" rows="4">{"anexoI": {"pCBSSN": "1.1612", "pIBSSN": "0.0129"}}</textarea></div>
+      <p class="hint">Data, município, itens e alíquotas vêm da própria nota. Notas de optantes do Simples (CRT 1, 2 e 4) usam as alíquotas efetivas acima.</p>
+    </aside>
+    <div class="main">
+      <div class="upload-box">
+        <label class="drop" for="x-file">
+          <input type="file" id="x-file" accept=".xml,.zip" multiple>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>
+          <strong>Escolha os XML das notas</strong>
+          <span class="sub">ou arraste vários .xml, ou um .zip, para cá</span>
+          <span class="fname"></span>
+        </label>
+        <p class="reqs">NF-e e NFC-e (modelos 55 e 65). O cálculo é comparado com o CBS e o IBS que a nota destacou. Até 200 notas e 40 MB por envio.</p>
+        <div class="actions">
+          <button class="btn primary" type="button" id="x-go">Conferir notas</button>
+          <a class="link" href="/exemplos/nfe-exemplo.zip">Baixar XMLs de exemplo</a>
+        </div>
       </div>
-      <div style="margin-top:12px"><label>Alíquotas efetivas (JSON — só para notas do Simples)</label>
-        <textarea id="x-aliq" rows="3">{"anexoI": {"pCBSSN": "1.1612", "pIBSSN": "0.0129"}}</textarea></div>
-      <div class="row-actions">
-        <button class="btn primary" type="button" id="x-go">Ler e conferir</button>
-        <a class="btn" href="/exemplos/nfe-exemplo.zip">Baixar XMLs de exemplo</a>
-      </div>
+      <div id="x-out" aria-live="polite"></div>
     </div>
-    <div id="x-out"></div>
   </section>
 </main>
 <footer>Os motores de cálculo pertencem à Receita Federal/Serpro (licença MIT). Este projeto é uma interface independente.</footer>
@@ -186,7 +330,10 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&":"&amp;", "<"
 
 // ---------- abas ----------
 function tab(which) {
-  for (const k of ["regular", "simples", "xml"]) { $("p-" + k).hidden = which !== k; $("tab-" + k).classList.toggle("on", which === k); }
+  for (const k of ["regular", "simples", "xml"]) {
+    $("p-" + k).hidden = which !== k;
+    $("tab-" + k).classList.toggle("on", which === k); $("tab-" + k).setAttribute("aria-selected", which === k);
+  }
 }
 $("tab-regular").onclick = () => tab("regular"); $("tab-simples").onclick = () => tab("simples"); $("tab-xml").onclick = () => tab("xml");
 
@@ -310,10 +457,13 @@ async function post(url, body) {
 }
 
 // ---------- renderização ----------
+const ROTULO = { CALCULADO:"Calculado", CALCULO_SIMULADO:"Calculado (simulado)", INCONSISTENCIA_ENTRADA:"Inconsistência na entrada", FALHA_TECNICA:"Falha técnica",
+  NAO_IMPLEMENTADO:"Não implementado", NAO_CALCULADO:"Não calculado", SEM_RESPOSTA:"Sem resposta", CONFERE:"Confere", DIVERGENTE:"Diverge", SEM_DESTAQUE:"Sem destaque na nota", PULADO:"Pulado" };
+const rot = (k) => esc(ROTULO[k] || k);
 const ESTADO = { CALCULADO: "ok", CALCULO_SIMULADO: "sim", INCONSISTENCIA_ENTRADA: "err", FALHA_TECNICA: "err", NAO_IMPLEMENTADO: "neutral", NAO_CALCULADO: "neutral" };
 function itemRow(o, values) {
   const erros = (o.erros || []).map((e) => `<li><b>${esc(e.code)}</b> ${esc(e.title)} — ${esc(e.detail)} <span class="hint">${esc(e.pointer || "")}</span></li>`).join("");
-  return `<tr><td>${esc(o.nObj ?? o.numero ?? "")}</td><td><span class="pill ${ESTADO[o.estadoItem] || "neutral"}">${esc(o.estadoItem || "—")}</span>${erros ? `<ul class="errs">${erros}</ul>` : ""}</td>${values}</tr>`;
+  return `<tr><td>${esc(o.nObj ?? o.numero ?? "")}</td><td><span class="pill ${ESTADO[o.estadoItem] || "neutral"}">${rot(o.estadoItem || "—")}</span>${erros ? `<ul class="errs">${erros}</ul>` : ""}</td>${values}</tr>`;
 }
 function renderRegular(res) {
   const r = res.resultado || {};
@@ -347,7 +497,7 @@ function renderSimples(res) {
 }
 
 async function run(btn, out, build, url, render) {
-  out.innerHTML = ""; btn.disabled = true; btn.textContent = "Calculando… (o motor pode levar ~1 min para acordar)";
+  espera(out); btn.disabled = true; btn.textContent = "Calculando…";
   try { out.innerHTML = render(await post(url, build())); }
   catch (e) { out.innerHTML = `<div class="card"><div class="status err">${esc(e.message)}</div></div>`; }
   finally { btn.disabled = false; btn.textContent = "Calcular"; }
@@ -367,7 +517,7 @@ function tabelaImportacao() {
   const linhas = ultimaImportacao.itens.filter((i) => !soErro || i.erros.length || !["CALCULADO", "CALCULO_SIMULADO"].includes(i.estado));
   const mostrar = linhas.slice(0, 200);
   $("r-tabimp").innerHTML = mostrar.map((i) => `<tr><td>${i.linha}</td><td>${esc(i.tipo)} ${esc(i.codigo)}</td><td>${esc(i.cst)}/${esc(i.cClassTrib)}</td>
-    <td><span class="pill ${ESTADO[i.estado] || "neutral"}">${esc(i.estado)}</span>${i.erros.map((e) => `<div class="hint" style="color:var(--err)"><b>${esc(e.code)}</b> ${esc(e.title)}</div>`).join("")}</td>
+    <td><span class="pill ${ESTADO[i.estado] || "neutral"}">${rot(i.estado)}</span>${i.erros.map((e) => `<div class="hint" style="color:var(--err)"><b>${esc(e.code)}</b> ${esc(e.title)}</div>`).join("")}</td>
     <td class="num">${fmtMoeda(i.vBC)}</td><td class="num">${fmtMoeda(i.vCBS)}</td><td class="num">${fmtMoeda(i.vIBS)}</td><td class="num">${fmtMoeda(i.vIS)}</td></tr>`).join("");
   $("r-nota").textContent = linhas.length > 200 ? `Mostrando 200 de ${linhas.length} linhas. Baixe o CSV para ver todas.` : `${linhas.length} linha(s).`;
 }
@@ -380,22 +530,22 @@ function csvImportacao() {
 }
 function renderImportacao(j) {
   ultimaImportacao = j; const r = j.resumo, t = j.totais;
-  const chips = Object.entries(r.porEstado).map(([k, v]) => `<span class="pill ${ESTADO[k] || "neutral"}">${esc(k)}: ${v}</span>`).join("");
-  return `<div class="card"><b>${r.produtos} produtos calculados em ${r.blocos} bloco(s) — ${r.comErro} com problema</b>
+  const chips = Object.entries(r.porEstado).map(([k, v]) => `<span class="pill ${ESTADO[k] || "neutral"}">${rot(k)}: ${v}</span>`).join("");
+  return `<div class="card"><b class="res-title">${r.produtos} produtos calculados em ${r.blocos} bloco(s) — ${r.comErro} com problema</b>
     <div class="chips" style="margin:8px 0">${chips}</div>
     ${j.avisos.length ? `<div class="status warn">Cálculo simulado (aviso do motor: ${esc(j.avisos.join(", "))})</div>` : ""}
-    <div class="grid" style="margin:8px 0"><div><label>Base total</label><b>${fmtMoeda(t.vBC)}</b></div><div><label>CBS total</label><b>${fmtMoeda(t.vCBS)}</b></div><div><label>IBS total</label><b>${fmtMoeda(t.vIBS)}</b></div><div><label>IS total</label><b>${fmtMoeda(t.vIS)}</b></div></div>
+    <div class="kpis"><div><label>Base total</label><b>${fmtMoeda(t.vBC)}</b></div><div><label>CBS total</label><b>${fmtMoeda(t.vCBS)}</b></div><div><label>IBS total</label><b>${fmtMoeda(t.vIBS)}</b></div><div><label>IS total</label><b>${fmtMoeda(t.vIS)}</b></div></div>
     <div class="row-actions"><label style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="r-soerro" style="width:auto"> só itens com problema</label><button class="btn" type="button" id="r-csv">Baixar resultado (.csv)</button><span class="hint" id="r-nota"></span></div>
     <div class="scroll" style="margin-top:8px"><table><thead><tr><th>Linha</th><th>Produto</th><th>CST/cClassTrib</th><th>Estado</th><th class="num">Base</th><th class="num">CBS</th><th class="num">IBS</th><th class="num">IS</th></tr></thead><tbody id="r-tabimp"></tbody></table></div></div>`;
 }
 $("r-import").onclick = async () => {
   const out = $("r-out"), btn = $("r-import"), f = $("r-file").files[0];
-  if (!f) { out.innerHTML = `<div class="card"><div class="status err">Escolha um arquivo .xlsx primeiro (ou baixe o modelo).</div></div>`; return; }
+  if (!f) { out.innerHTML = `<div class="card"><div class="status err">Escolha uma planilha .xlsx para calcular. Se ainda não tem uma, baixe o modelo.</div></div>`; return; }
   const fd = new FormData(); fd.append("arquivo", f);
   let dh; try { dh = dhIso(); } catch (e) { out.innerHTML = `<div class="card"><div class="status err">${esc(e.message)}</div></div>`; return; }
   fd.append("dhFatoGerador", dh); fd.append("municipio", $("r-mun").value.trim()); fd.append("uf", $("r-uf").value.trim().toUpperCase());
   [["cbs", "r-cbs"], ["ibsEstadual", "r-ibsuf"], ["ibsMunicipal", "r-ibsmun"]].forEach(([k, id]) => { if ($(id).value.trim()) fd.append(k, $(id).value.trim()); });
-  out.innerHTML = ""; btn.disabled = true; btn.textContent = "Calculando… (arquivos grandes e motor dormindo podem levar alguns minutos)";
+  espera(out); btn.disabled = true; btn.textContent = "Calculando…";
   try {
     const resp = await fetch("/api/regime-geral/importar", { method: "POST", body: fd });
     let data = null; try { data = await resp.json(); } catch { /* sem corpo */ }
@@ -408,7 +558,7 @@ $("r-import").onclick = async () => {
     out.innerHTML = renderImportacao(data); tabelaImportacao();
     $("r-soerro").onchange = tabelaImportacao; $("r-csv").onclick = csvImportacao;
   } catch (e) { out.innerHTML = `<div class="card"><div class="status err">${esc(e.message)}</div>${e.html || ""}</div>`; }
-  finally { btn.disabled = false; btn.textContent = "Importar e calcular"; }
+  finally { btn.disabled = false; btn.textContent = "Calcular planilha"; }
 };
 
 
@@ -420,7 +570,7 @@ function tabelaSimples() {
   const soErro = $("s-soerro")?.checked;
   const linhas = ultimaSimples.itens.filter((i) => !soErro || i.erros.length || !OKS.includes(i.estado));
   $("s-tabimp").innerHTML = linhas.slice(0, 200).map((i) => `<tr><td>${i.linha}</td><td>${esc(i.tipo)} ${esc(i.codigo)}</td><td>${esc(i.cativ)}/${esc(i.cClassTrib)}</td>
-    <td><span class="pill ${ESTADO[i.estado] || "neutral"}">${esc(i.estado)}</span>${i.erros.map((e) => `<div class="hint" style="color:var(--err)"><b>${esc(e.code)}</b> ${esc(e.title)}</div>`).join("")}${i.avisos.map((a) => `<div class="hint">${esc(a)}</div>`).join("")}</td>
+    <td><span class="pill ${ESTADO[i.estado] || "neutral"}">${rot(i.estado)}</span>${i.erros.map((e) => `<div class="hint" style="color:var(--err)"><b>${esc(e.code)}</b> ${esc(e.title)}</div>`).join("")}${i.avisos.map((a) => `<div class="hint">${esc(a)}</div>`).join("")}</td>
     <td class="num">${fmtMoeda(i.vBC)}</td><td class="num">${fmtMoeda(i.vCBS)}</td><td class="num">${fmtMoeda(i.vIBS)}</td><td class="num">${fmtMoeda(i.vIS)}</td><td class="num">${fmtMoeda(i.total)}</td></tr>`).join("");
   $("s-nota").textContent = linhas.length > 200 ? `Mostrando 200 de ${linhas.length} linhas. Baixe o CSV para ver todas.` : `${linhas.length} linha(s).`;
 }
@@ -433,21 +583,21 @@ function csvSimples() {
 }
 function renderSimplesImportacao(j) {
   ultimaSimples = j; const r = j.resumo, t = j.totais;
-  const chips = Object.entries(r.porEstado).map(([k, v]) => `<span class="pill ${ESTADO[k] || "neutral"}">${esc(k)}: ${v}</span>`).join("");
-  return `<div class="card"><b>${r.produtos} produtos calculados em ${r.blocos} bloco(s) — ${r.comErro} com problema</b>
+  const chips = Object.entries(r.porEstado).map(([k, v]) => `<span class="pill ${ESTADO[k] || "neutral"}">${rot(k)}: ${v}</span>`).join("");
+  return `<div class="card"><b class="res-title">${r.produtos} produtos calculados em ${r.blocos} bloco(s) — ${r.comErro} com problema</b>
     <div class="chips" style="margin:8px 0">${chips}</div>
     ${j.avisos.length ? `<div class="status warn">Avisos do motor: ${esc(j.avisos.join(" | "))}</div>` : ""}
-    <div class="grid" style="margin:8px 0"><div><label>Base total</label><b>${fmtMoeda(t.vBC)}</b></div><div><label>CBS total</label><b>${fmtMoeda(t.vCBS)}</b></div><div><label>IBS total</label><b>${fmtMoeda(t.vIBS)}</b></div><div><label>IS total</label><b>${fmtMoeda(t.vIS)}</b></div><div><label>Total de tributos</label><b>${fmtMoeda(t.total)}</b></div></div>
+    <div class="kpis"><div><label>Base total</label><b>${fmtMoeda(t.vBC)}</b></div><div><label>CBS total</label><b>${fmtMoeda(t.vCBS)}</b></div><div><label>IBS total</label><b>${fmtMoeda(t.vIBS)}</b></div><div><label>IS total</label><b>${fmtMoeda(t.vIS)}</b></div><div><label>Total de tributos</label><b>${fmtMoeda(t.total)}</b></div></div>
     <div class="row-actions"><label style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="s-soerro" style="width:auto"> só itens com problema</label><button class="btn" type="button" id="s-csv">Baixar resultado (.csv)</button><span class="hint" id="s-nota"></span></div>
     <div class="scroll" style="margin-top:8px"><table><thead><tr><th>Linha</th><th>Produto</th><th>cAtivSN/cClassTrib</th><th>Estado</th><th class="num">Base</th><th class="num">CBS</th><th class="num">IBS</th><th class="num">IS</th><th class="num">Total</th></tr></thead><tbody id="s-tabimp"></tbody></table></div></div>`;
 }
 $("s-import").onclick = async () => {
   const out = $("s-out"), btn = $("s-import"), f = $("s-file").files[0];
-  if (!f) { out.innerHTML = `<div class="card"><div class="status err">Escolha um arquivo .xlsx primeiro (ou baixe o modelo).</div></div>`; return; }
+  if (!f) { out.innerHTML = `<div class="card"><div class="status err">Escolha uma planilha .xlsx para calcular. Se ainda não tem uma, baixe o modelo.</div></div>`; return; }
   const fd = new FormData(); fd.append("arquivo", f);
   fd.append("data", $("s-data").value); fd.append("tpDoc", $("s-tpdoc").value); fd.append("CRT", $("s-crt").value);
   fd.append("aliquotasEfetivas", $("s-aliq").value.trim());
-  out.innerHTML = ""; btn.disabled = true; btn.textContent = "Calculando… (arquivos grandes e motor dormindo podem levar alguns minutos)";
+  espera(out); btn.disabled = true; btn.textContent = "Calculando…";
   try {
     const resp = await fetch("/api/simples-nacional/importar", { method: "POST", body: fd });
     let data = null; try { data = await resp.json(); } catch { /* sem corpo */ }
@@ -460,7 +610,7 @@ $("s-import").onclick = async () => {
     out.innerHTML = renderSimplesImportacao(data); tabelaSimples();
     $("s-soerro").onchange = tabelaSimples; $("s-csv").onclick = csvSimples;
   } catch (e) { out.innerHTML = `<div class="card"><div class="status err">${esc(e.message)}</div>${e.html || ""}</div>`; }
-  finally { btn.disabled = false; btn.textContent = "Importar e calcular"; }
+  finally { btn.disabled = false; btn.textContent = "Calcular planilha"; }
 };
 
 
@@ -469,48 +619,71 @@ let ultimaXml = null;
 const STX = { CONFERE: "ok", DIVERGENTE: "err", SEM_DESTAQUE: "sim", NAO_CALCULADO: "err", PULADO: "neutral" };
 function renderXml(j) {
   ultimaXml = j; const r = j.resumo, t = j.totais;
-  const chips = Object.entries(r.porStatus).map(([k, v]) => `<span class="pill ${STX[k] || "neutral"}">${esc(k)}: ${v}</span>`).join("");
+  const chips = Object.entries(r.porStatus).map(([k, v]) => `<span class="pill ${STX[k] || "neutral"}">${rot(k)}: ${v}</span>`).join("");
   const dif = (a, b) => fmtMoeda(Number(a) - Number(b));
   const notas = j.notas.map((n) => {
     if (n.erro) return `<div class="card"><b>${esc(n.arquivo)}</b><div class="status err">${esc(n.erro)}</div></div>`;
-    const ch = Object.entries(n.contagem).map(([k, v]) => `<span class="pill ${STX[k] || "neutral"}">${esc(k)}: ${v}</span>`).join("");
-    const linhas = n.itens.map((i) => `<tr><td>${esc(i.nItem)}</td><td>${esc(i.ncm)} <span class="hint">${esc(i.produto)}</span></td><td>${esc(i.cst)}/${esc(i.cClassTrib)}</td>
-      <td><span class="pill ${STX[i.status] || "neutral"}">${esc(i.status)}</span>${i.motivo ? `<div class="hint">${esc(i.motivo)}</div>` : ""}${(i.erros || []).map((e) => `<div class="hint" style="color:var(--err)"><b>${esc(e.code)}</b> ${esc(e.title)}</div>`).join("")}</td>
+    const ch = Object.entries(n.contagem).map(([k, v]) => `<span class="pill ${STX[k] || "neutral"}">${rot(k)}: ${v}</span>`).join("");
+    const linhas = n.itens.map((i) => `<tr><td>${esc(i.nItem)}</td><td>${esc(i.ncm)} <span class="hint">${esc(i.produto)}</span></td><td>${i.cClassTrib ? esc(i.cst) + "/" + esc(i.cClassTrib) : "—"}</td>
+      <td><span class="pill ${STX[i.status] || "neutral"}">${rot(i.status)}</span>${i.motivo ? `<div class="hint">${esc(i.motivo)}</div>` : ""}${(i.erros || []).map((e) => `<div class="hint" style="color:var(--err)"><b>${esc(e.code)}</b> ${esc(e.title)}</div>`).join("")}</td>
       <td class="num">${fmtMoeda(i.calc?.vCBS)}</td><td class="num">${fmtMoeda(i.xml.vCBS)}</td><td class="num">${fmtMoeda(i.calc?.vIBS)}</td><td class="num">${fmtMoeda(i.xml.vIBS)}</td></tr>`).join("");
     return `<div class="card"><b>${esc(n.arquivo)}</b> <span class="hint">NF ${esc(n.nNF)} · modelo ${esc(n.mod)} · CRT ${esc(n.crt)} (${esc(n.regime || "?")}) · ${esc(n.dhEmi.slice(0, 10))}</span>
       <div class="chips" style="margin:8px 0">${ch}</div>
       <div class="scroll"><table><thead><tr><th>Item</th><th>Produto</th><th>CST/cClassTrib</th><th>Situação</th><th class="num">CBS calculada</th><th class="num">CBS na nota</th><th class="num">IBS calculado</th><th class="num">IBS na nota</th></tr></thead><tbody>${linhas}</tbody></table></div></div>`;
   }).join("");
-  return `<div class="card"><b>${r.notas} nota(s), ${r.itens} itens${r.comErroLeitura ? ` — ${r.comErroLeitura} arquivo(s) não lido(s)` : ""}</b>
+  return `<div class="card"><b class="res-title">${r.notas} nota(s), ${r.itens} itens${r.comErroLeitura ? ` — ${r.comErroLeitura} arquivo(s) não lido(s)` : ""}</b>
     <div class="chips" style="margin:8px 0">${chips}</div>
     ${j.avisos.length ? `<div class="status warn">Cálculo simulado (aviso do motor: ${esc(j.avisos.join(", "))})</div>` : ""}
-    <div class="grid" style="margin:8px 0"><div><label>CBS calculada</label><b>${fmtMoeda(t.calcCBS)}</b></div><div><label>CBS na nota</label><b>${fmtMoeda(t.xmlCBS)}</b></div><div><label>IBS calculado</label><b>${fmtMoeda(t.calcIBS)}</b></div><div><label>IBS na nota</label><b>${fmtMoeda(t.xmlIBS)}</b></div></div>
+    <div class="kpis"><div><label>CBS calculada</label><b>${fmtMoeda(t.calcCBS)}</b></div><div><label>CBS na nota</label><b>${fmtMoeda(t.xmlCBS)}</b></div><div><label>IBS calculado</label><b>${fmtMoeda(t.calcIBS)}</b></div><div><label>IBS na nota</label><b>${fmtMoeda(t.xmlIBS)}</b></div></div>
     <p class="hint">Diferença total: CBS ${dif(t.calcCBS, t.xmlCBS)} · IBS ${dif(t.calcIBS, t.xmlIBS)} (calculado − nota; só itens calculados).</p></div>${notas}`;
 }
 $("x-go").onclick = async () => {
   const out = $("x-out"), btn = $("x-go"), fs = $("x-file").files;
-  if (!fs.length) { out.innerHTML = `<div class="card"><div class="status err">Escolha ao menos um .xml ou .zip (ou baixe os XMLs de exemplo).</div></div>`; return; }
+  if (!fs.length) { out.innerHTML = `<div class="card"><div class="status err">Escolha ao menos um .xml ou .zip. Se ainda não tem, baixe os XMLs de exemplo.</div></div>`; return; }
   const fd = new FormData(); for (const f of fs) fd.append("arquivos", f);
   fd.append("tolerancia", $("x-tol").value.trim() || "0.01"); fd.append("cAtivSN", $("x-ativ").value.trim() || "01"); fd.append("aliquotasEfetivas", $("x-aliq").value.trim());
-  out.innerHTML = ""; btn.disabled = true; btn.textContent = "Calculando… (motor dormindo pode levar alguns minutos)";
+  espera(out); btn.disabled = true; btn.textContent = "Calculando…";
   try {
     const resp = await fetch("/api/xml/importar", { method: "POST", body: fd });
     let data = null; try { data = await resp.json(); } catch { /* sem corpo */ }
     if (!resp.ok) { const d = data?.detail; throw new Error(`HTTP ${resp.status} — ${Array.isArray(d) ? d.map((e) => `${(e.loc || []).slice(1).join(".")}: ${e.msg}`).join("; ") : typeof d === "string" ? d : JSON.stringify(d ?? data)}`); }
     out.innerHTML = renderXml(data);
   } catch (e) { out.innerHTML = `<div class="card"><div class="status err">${esc(e.message)}</div></div>`; }
-  finally { btn.disabled = false; btn.textContent = "Ler e conferir"; }
+  finally { btn.disabled = false; btn.textContent = "Conferir notas"; }
 };
+
+
+// ---------- áreas de arquivo (clicar ou arrastar) ----------
+document.querySelectorAll(".drop").forEach((box) => {
+  const input = box.querySelector("input[type=file]"), nome = box.querySelector(".fname");
+  const mostrar = () => {
+    const fs = [...input.files];
+    box.classList.toggle("has", fs.length > 0);
+    nome.textContent = fs.length > 1 ? `${fs.length} arquivos selecionados` : fs[0]?.name || "";
+  };
+  input.addEventListener("change", mostrar);
+  ["dragenter", "dragover"].forEach((ev) => box.addEventListener(ev, (e) => { e.preventDefault(); box.classList.add("over"); }));
+  ["dragleave", "drop"].forEach((ev) => box.addEventListener(ev, (e) => { e.preventDefault(); box.classList.remove("over"); }));
+  box.addEventListener("drop", (e) => {
+    const fs = [...e.dataTransfer.files].filter((f) => (input.accept || "").split(",").some((x) => f.name.toLowerCase().endsWith(x.trim())));
+    if (!fs.length) return;
+    const dt = new DataTransfer(); (input.multiple ? fs : fs.slice(0, 1)).forEach((f) => dt.items.add(f));
+    input.files = dt.files; mostrar();
+  });
+});
+const espera = (out) => { out.innerHTML = `<div class="status wait">Calculando. Se o motor estiver dormindo, a primeira resposta pode levar até 3 minutos.</div>`; };
 
 // ---------- aquece os motores (plano free dorme após inatividade) ----------
 async function aquecer(tentativa = 0) {
   const el = $("motores");
   try {
     const r = await (await fetch("/api/aquecer")).json();
-    const txt = (ok) => (ok ? "pronto" : "acordando…");
-    el.textContent = `Motores — regime regular: ${txt(r.regular)} · Simples: ${txt(r.simples)}`;
-    if (!(r.regular && r.simples) && tentativa < 30) setTimeout(() => aquecer(tentativa + 1), 8000);
-  } catch { el.textContent = "Motores: não foi possível verificar"; }
+    const pronto = r.regular && r.simples;
+    el.dataset.s = pronto ? "ok" : "wait";
+    el.textContent = pronto ? "Motores prontos" : "Acordando os motores… (até 3 minutos)";
+    el.title = `Regime regular: ${r.regular ? "pronto" : "acordando"} · Simples Nacional: ${r.simples ? "pronto" : "acordando"}`;
+    if (!pronto && tentativa < 30) setTimeout(() => aquecer(tentativa + 1), 8000);
+  } catch { el.dataset.s = "off"; el.textContent = "Não foi possível verificar os motores"; }
 }
 aquecer();
 </script>
