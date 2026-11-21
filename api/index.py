@@ -9,13 +9,18 @@ Roda como Vercel Function (Python). Os motores (Java + SQLite) ficam em outro se
 
 from __future__ import annotations
 
+import io
 import os
 import re
+import unicodedata
 import uuid
+from concurrent.futures import ThreadPoolExecutor
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import httpx
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 MAX_ITENS = 990  # limite de itens de uma NF-e
@@ -200,3 +205,234 @@ def dados_abertos(
         raise HTTPException(status_code=404, detail="Recurso não disponível.")
     params = {k: v for k, v in {"data": data, "ncm": ncm, "nbs": nbs, "codigoUf": codigoUf}.items() if v}
     return _call("regular", "GET", f"{REGULAR_DADOS}/{recurso}", params=params)
+
+
+# ---------------------------------------------------------------- importação de planilha (.xlsx)
+CHUNK = 100                      # itens por chamada ao motor (uma NF-e aceita até 990)
+MAX_LINHAS = 5000
+MAX_BYTES = 10 * 1024 * 1024
+ESTADOS_CALCULADOS = {"CALCULADO", "CALCULO_SIMULADO"}
+
+COLUNAS = {  # cabeçalho normalizado -> campo interno
+    "tipo": "tipo",
+    "ncmnbs": "codigo",
+    "cst": "cst",
+    "cclasstrib": "cclasstrib",
+    "basedecalculo": "base",
+    "basecalculo": "base",
+    "quantidade": "quantidade",
+    "qtd": "quantidade",
+    "unidade": "unidade",
+    "descricao": "descricao",
+}
+OBRIGATORIAS = {"tipo": "Tipo", "codigo": "NCM / NBS", "cst": "CST", "cclasstrib": "cClassTrib", "base": "Base de cálculo"}
+
+
+def _norm(texto: Any) -> str:
+    s = unicodedata.normalize("NFKD", str(texto or "")).encode("ascii", "ignore").decode().lower()
+    return re.sub(r"[^a-z0-9]", "", s)
+
+
+def _texto(v: Any) -> str:
+    if v is None:
+        return ""
+    if isinstance(v, float) and v.is_integer():
+        v = int(v)
+    return str(v).strip()
+
+
+def _codigo(v: Any, tamanho: int) -> str:
+    """Excel guarda 02013000 como número 2013000: recompõe os zeros à esquerda."""
+    t = _texto(v).replace(".", "").replace("-", "").replace(" ", "")
+    return t.zfill(tamanho) if tamanho and t.isdigit() else t
+
+
+def _decimal(v: Any) -> Decimal | None:
+    try:
+        return Decimal(_texto(v).replace(",", "."))
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def ler_planilha(conteudo: bytes) -> list[dict[str, Any]]:
+    """Lê o .xlsx e valida. Levanta HTTP 422 com a lista de problemas (colunas ou linhas)."""
+    from openpyxl import load_workbook
+
+    try:
+        wb = load_workbook(io.BytesIO(conteudo), read_only=True, data_only=True)
+    except Exception as exc:  # arquivo não é xlsx válido
+        raise HTTPException(status_code=422, detail="Arquivo inválido: envie uma planilha .xlsx.") from exc
+
+    linhas = wb.worksheets[0].iter_rows(values_only=True)
+    mapa: dict[str, int] = {}
+    numero = 0
+    for numero, row in enumerate(linhas, start=1):  # cabeçalho: primeira linha com "Tipo" e "NCM / NBS"
+        achados = {COLUNAS[_norm(c)]: i for i, c in enumerate(row) if _norm(c) in COLUNAS}
+        if "tipo" in achados and "codigo" in achados:
+            mapa = achados
+            break
+        if numero >= 10:
+            break
+    faltam = [nome for chave, nome in OBRIGATORIAS.items() if chave not in mapa]
+    if not mapa or faltam:
+        raise HTTPException(
+            status_code=422,
+            detail="Colunas obrigatórias ausentes: " + ", ".join(faltam or ["Tipo", "NCM / NBS"]) + ". Baixe o modelo para ver o formato.",
+        )
+
+    itens: list[dict[str, Any]] = []
+    problemas: list[str] = []
+    for row in linhas:
+        numero += 1
+        if all(c is None or _texto(c) == "" for c in row):
+            continue  # linha em branco
+        get = lambda campo: row[mapa[campo]] if campo in mapa and mapa[campo] < len(row) else None  # noqa: E731
+        tipo = _texto(get("tipo")).upper()
+        erros = []
+        if tipo not in {"NCM", "NBS"}:
+            erros.append("Tipo deve ser NCM ou NBS")
+        codigo = _codigo(get("codigo"), 8 if tipo == "NCM" else 0)  # só o NCM perde zeros à esquerda no Excel
+        if tipo == "NCM" and not re.fullmatch(r"\d{8}", codigo):
+            erros.append("NCM deve ter 8 dígitos")
+        if tipo == "NBS" and not re.fullmatch(r"\d{9}", codigo):
+            erros.append("NBS deve ter 9 dígitos")
+        cst = _codigo(get("cst"), 3)
+        if not re.fullmatch(r"\d{3}", cst):
+            erros.append("CST deve ter 3 dígitos")
+        ccls = _codigo(get("cclasstrib"), 6)
+        if not re.fullmatch(r"\d{6}", ccls):
+            erros.append("cClassTrib deve ter 6 dígitos")
+        base = _decimal(get("base"))
+        if base is None or base <= 0:
+            erros.append("Base de cálculo deve ser um número maior que zero")
+        qtd = _decimal(get("quantidade")) if _texto(get("quantidade")) else None
+        if _texto(get("quantidade")) and (qtd is None or qtd <= 0):
+            erros.append("Quantidade inválida")
+        if erros:
+            problemas.append(f"Linha {numero}: " + "; ".join(erros))
+            continue
+        itens.append({"linha": numero, "tipo": tipo, "codigo": codigo, "cst": cst, "cClassTrib": ccls,
+                      "base": base, "quantidade": qtd, "unidade": _texto(get("unidade")) or None})
+        if len(itens) > MAX_LINHAS:
+            raise HTTPException(status_code=422, detail=f"A planilha excede o limite de {MAX_LINHAS} produtos.")
+
+    if problemas:
+        extra = f" (+{len(problemas) - 30} outras)" if len(problemas) > 30 else ""
+        raise HTTPException(status_code=422, detail={"mensagem": "Há linhas inválidas na planilha." + extra, "linhas": problemas[:30]})
+    if not itens:
+        raise HTTPException(status_code=422, detail="A planilha não tem produtos abaixo do cabeçalho.")
+    return itens
+
+
+def _dec(v: Any) -> Decimal:
+    d = _decimal(v)
+    return d if d is not None else Decimal("0")
+
+
+def _bloco(ctx: dict[str, Any], bloco: list[dict[str, Any]]) -> dict[str, Any]:
+    itens = []
+    for i, it in enumerate(bloco, start=1):
+        d: dict[str, Any] = {"numero": i, "cst": it["cst"], "cClassTrib": it["cClassTrib"], "baseCalculo": float(it["base"])}
+        d[it["tipo"].lower()] = it["codigo"]
+        if it["quantidade"] is not None:
+            d["quantidade"] = float(it["quantidade"])
+        if it["unidade"]:
+            d["unidade"] = it["unidade"]
+        if ctx["aliquotas"]:
+            d["aliquotasNominais"] = ctx["aliquotas"]
+        itens.append(d)
+    body = {"id": uuid.uuid4().hex, "versao": "1.0.0", "dhFatoGerador": ctx["dh"], "municipio": ctx["municipio"], "uf": ctx["uf"], "itens": itens}
+    return _call("regular", "POST", REGULAR_CALCULO, json=body)
+
+
+def _resumir(bloco: list[dict[str, Any]], resp: dict[str, Any]) -> list[dict[str, Any]]:
+    objetos = {o.get("nObj"): o for o in (resp.get("resultado") or {}).get("objetos", [])}
+    saida = []
+    for i, it in enumerate(bloco, start=1):
+        o = objetos.get(i, {})
+        trib = o.get("tribCalc") or {}
+        g = (trib.get("IBSCBS") or {}).get("gIBSCBS") or {}
+        is_ = trib.get("IS") or {}
+        saida.append({
+            "linha": it["linha"], "tipo": it["tipo"], "codigo": it["codigo"], "cst": it["cst"], "cClassTrib": it["cClassTrib"],
+            "estado": o.get("estadoItem", "SEM_RESPOSTA"),
+            "vBC": g.get("vBC"), "vCBS": (g.get("gCBS") or {}).get("vCBS"), "vIBS": g.get("vIBS"),
+            "vIS": is_.get("vIS") or (is_.get("gIS") or {}).get("vIS"),
+            "erros": [{"code": e.get("code"), "title": e.get("title"), "detail": e.get("detail")} for e in o.get("erros", [])],
+        })
+    return saida
+
+
+def _opcional(v: str | None) -> float | None:
+    if v is None or v.strip() == "":
+        return None
+    try:
+        return float(v.replace(",", "."))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"Alíquota inválida: {v}") from exc
+
+
+@app.post("/api/regime-geral/importar")
+def importar(
+    arquivo: UploadFile = File(...),
+    dhFatoGerador: str = Form(...),
+    municipio: int = Form(...),
+    uf: str = Form(..., pattern=r"^[A-Za-z]{2}$"),
+    cbs: str | None = Form(None),
+    ibsEstadual: str | None = Form(None),
+    ibsMunicipal: str | None = Form(None),
+) -> Any:
+    """Calcula CBS/IBS/IS para os produtos de uma planilha .xlsx (em blocos de 100 itens)."""
+    conteudo = arquivo.file.read(MAX_BYTES + 1)
+    if len(conteudo) > MAX_BYTES:
+        raise HTTPException(status_code=413, detail="Arquivo maior que 10 MB.")
+    itens = ler_planilha(conteudo)
+
+    aliquotas = {k: v for k, v in {"cbs": _opcional(cbs), "ibsEstadual": _opcional(ibsEstadual), "ibsMunicipal": _opcional(ibsMunicipal)}.items() if v is not None}
+    ctx = {"dh": dhFatoGerador, "municipio": municipio, "uf": uf.upper(), "aliquotas": aliquotas}
+    blocos = [itens[i : i + CHUNK] for i in range(0, len(itens), CHUNK)]
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        respostas = list(pool.map(lambda b: _bloco(ctx, b), blocos))
+
+    resultado = [r for b, resp in zip(blocos, respostas) for r in _resumir(b, resp)]
+    por_estado: dict[str, int] = {}
+    totais = {"vBC": Decimal("0"), "vCBS": Decimal("0"), "vIBS": Decimal("0"), "vIS": Decimal("0")}
+    for r in resultado:
+        por_estado[r["estado"]] = por_estado.get(r["estado"], 0) + 1
+        if r["estado"] in ESTADOS_CALCULADOS:
+            for k in totais:
+                totais[k] += _dec(r[k])
+    return {
+        "resumo": {"produtos": len(resultado), "blocos": len(blocos), "porEstado": por_estado, "comErro": sum(1 for r in resultado if r["erros"] or r["estado"] not in ESTADOS_CALCULADOS)},
+        "totais": {k: f"{v:.2f}" for k, v in totais.items()},
+        "avisos": sorted({r["aviso"] for r in respostas if r.get("aviso")}),
+        "itens": resultado,
+    }
+
+
+@app.get("/api/modelo.xlsx")
+def modelo() -> StreamingResponse:
+    """Planilha modelo com as colunas esperadas pela importação."""
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Produtos"
+    ws.append(["Tipo", "NCM / NBS", "Descrição", "CST", "cClassTrib", "Base de cálculo", "Quantidade", "Unidade"])
+    ws.append(["NCM", "10063021", "Arroz", "200", "200003", 100.00, 20, "KG"])
+    ws.append(["NBS", "122011200", "Serviço de educação", "200", "200028", 1200.00, None, None])
+    for col, largura in zip("ABCDEFGH", (8, 14, 36, 7, 12, 16, 12, 9)):
+        ws.column_dimensions[col].width = largura
+    from openpyxl.styles import Font
+
+    for c in ws[1]:
+        c.font = Font(bold=True)
+    for linha in ws.iter_rows(min_row=2, max_col=5):  # códigos como texto, preservando zeros à esquerda
+        for c in linha[1:2] + linha[3:5]:
+            c.number_format = "@"
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                             headers={"Content-Disposition": 'attachment; filename="modelo-produtos.xlsx"'})

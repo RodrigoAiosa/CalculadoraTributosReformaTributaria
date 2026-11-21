@@ -38,6 +38,10 @@
   .num { text-align:right; font-variant-numeric:tabular-nums; }
   details { margin-top:10px; } summary { cursor:pointer; color:var(--accent); font-size:13px; }
   pre { background:#0f1722; color:#d6e2f0; padding:12px; border-radius:8px; overflow:auto; font-size:12px; max-height:380px; }
+  a.btn { text-decoration:none; color:inherit; display:inline-block; padding:8px 14px; border-radius:8px; border:1px solid var(--line); background:#fff; font-size:14px; }
+  details.card > summary { font-size:14px; }
+  .chips span { margin-right:6px; }
+  .scroll { max-height:520px; overflow:auto; }
   .hint { font-size:12px; color:var(--mute); margin:6px 0 0; }
   .errs { margin:4px 0 0; padding-left:18px; color:var(--err); font-size:12.5px; }
   @media (max-width:640px) {
@@ -82,8 +86,19 @@
       </div>
       <p class="hint">As alíquotas acima são aplicadas a todos os itens. Antes de 2027 o motor <b>proíbe</b> informá-las: deixe os três campos em branco e use data de 2026.</p>
     </div>
-    <div class="card">
-      <div class="items-wrap"><table id="r-table" class="stack">
+    <div class="card" id="r-upload">
+      <b>Importar produtos (.xlsx)</b>
+      <p class="hint">Colunas obrigatórias: <b>Tipo</b> (NCM ou NBS), <b>NCM / NBS</b>, <b>CST</b>, <b>cClassTrib</b> e <b>Base de cálculo</b>. Opcionais: Descrição, Quantidade, Unidade. Até 5.000 produtos e 10 MB; o cálculo usa a data, UF, município e alíquotas acima.</p>
+      <input type="file" id="r-file" accept=".xlsx" style="margin-top:8px">
+      <div class="row-actions">
+        <button class="btn primary" type="button" id="r-import">Importar e calcular</button>
+        <a class="btn" href="/api/modelo.xlsx">Baixar modelo</a>
+        <a class="btn" href="/exemplos/produtos-1000.xlsx">Baixar exemplo com 1.000 produtos</a>
+      </div>
+    </div>
+    <details class="card" id="r-manual">
+      <summary>Ou digite poucos itens manualmente</summary>
+      <div class="items-wrap" style="margin-top:10px"><table id="r-table" class="stack">
         <thead><tr><th>Nº</th><th>Tipo</th><th>NCM / NBS</th><th>CST</th><th>cClassTrib</th><th>Base de cálculo</th><th>Qtd.</th><th>Unid.</th><th></th></tr></thead>
         <tbody></tbody>
       </table></div>
@@ -96,7 +111,7 @@
         <textarea id="r-json" rows="10" placeholder="Deixe vazio para usar o formulário"></textarea>
         <div class="row-actions"><button class="btn" type="button" id="r-fill">Gerar JSON do formulário</button><span class="hint">Se esta caixa tiver conteúdo, ela é enviada no lugar do formulário.</span></div>
       </details>
-    </div>
+    </details>
     <div id="r-out"></div>
   </section>
 
@@ -298,6 +313,59 @@ $("r-go").onclick = () => run($("r-go"), $("r-out"), () => ($("r-json").value.tr
 $("s-go").onclick = () => run($("s-go"), $("s-out"), payloadSimples, "/api/simples-nacional/calcular", renderSimples);
 
 $("r-example").click(); $("s-example").click();
+
+
+// ---------- importação de planilha ----------
+let ultimaImportacao = null;
+const fmtMoeda = (v) => (v == null || v === "" ? "" : Number(v).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+function tabelaImportacao() {
+  if (!ultimaImportacao) return;
+  const soErro = $("r-soerro")?.checked;
+  const linhas = ultimaImportacao.itens.filter((i) => !soErro || i.erros.length || !["CALCULADO", "CALCULO_SIMULADO"].includes(i.estado));
+  const mostrar = linhas.slice(0, 200);
+  $("r-tabimp").innerHTML = mostrar.map((i) => `<tr><td>${i.linha}</td><td>${esc(i.tipo)} ${esc(i.codigo)}</td><td>${esc(i.cst)}/${esc(i.cClassTrib)}</td>
+    <td><span class="pill ${ESTADO[i.estado] || "neutral"}">${esc(i.estado)}</span>${i.erros.map((e) => `<div class="hint" style="color:var(--err)"><b>${esc(e.code)}</b> ${esc(e.title)}</div>`).join("")}</td>
+    <td class="num">${fmtMoeda(i.vBC)}</td><td class="num">${fmtMoeda(i.vCBS)}</td><td class="num">${fmtMoeda(i.vIBS)}</td><td class="num">${fmtMoeda(i.vIS)}</td></tr>`).join("");
+  $("r-nota").textContent = linhas.length > 200 ? `Mostrando 200 de ${linhas.length} linhas. Baixe o CSV para ver todas.` : `${linhas.length} linha(s).`;
+}
+function csvImportacao() {
+  const cab = ["linha", "tipo", "codigo", "cst", "cClassTrib", "estado", "vBC", "vCBS", "vIBS", "vIS", "erros"];
+  const q = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const linhas = ultimaImportacao.itens.map((i) => [i.linha, i.tipo, i.codigo, i.cst, i.cClassTrib, i.estado, i.vBC, i.vCBS, i.vIBS, i.vIS, i.erros.map((e) => `${e.code} ${e.title}`).join(" | ")].map(q).join(";"));
+  const blob = new Blob(["\ufeff" + [cab.join(";"), ...linhas].join("\n")], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "resultado-calculo.csv"; a.click();
+}
+function renderImportacao(j) {
+  ultimaImportacao = j; const r = j.resumo, t = j.totais;
+  const chips = Object.entries(r.porEstado).map(([k, v]) => `<span class="pill ${ESTADO[k] || "neutral"}">${esc(k)}: ${v}</span>`).join("");
+  return `<div class="card"><b>${r.produtos} produtos calculados em ${r.blocos} bloco(s) — ${r.comErro} com problema</b>
+    <div class="chips" style="margin:8px 0">${chips}</div>
+    ${j.avisos.length ? `<div class="status warn">Cálculo simulado (aviso do motor: ${esc(j.avisos.join(", "))})</div>` : ""}
+    <div class="grid" style="margin:8px 0"><div><label>Base total</label><b>${fmtMoeda(t.vBC)}</b></div><div><label>CBS total</label><b>${fmtMoeda(t.vCBS)}</b></div><div><label>IBS total</label><b>${fmtMoeda(t.vIBS)}</b></div><div><label>IS total</label><b>${fmtMoeda(t.vIS)}</b></div></div>
+    <div class="row-actions"><label style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="r-soerro" style="width:auto"> só itens com problema</label><button class="btn" type="button" id="r-csv">Baixar resultado (.csv)</button><span class="hint" id="r-nota"></span></div>
+    <div class="scroll" style="margin-top:8px"><table><thead><tr><th>Linha</th><th>Produto</th><th>CST/cClassTrib</th><th>Estado</th><th class="num">Base</th><th class="num">CBS</th><th class="num">IBS</th><th class="num">IS</th></tr></thead><tbody id="r-tabimp"></tbody></table></div></div>`;
+}
+$("r-import").onclick = async () => {
+  const out = $("r-out"), btn = $("r-import"), f = $("r-file").files[0];
+  if (!f) { out.innerHTML = `<div class="card"><div class="status err">Escolha um arquivo .xlsx primeiro (ou baixe o modelo).</div></div>`; return; }
+  const fd = new FormData(); fd.append("arquivo", f);
+  fd.append("dhFatoGerador", $("r-dh").value.trim()); fd.append("municipio", $("r-mun").value.trim()); fd.append("uf", $("r-uf").value.trim().toUpperCase());
+  [["cbs", "r-cbs"], ["ibsEstadual", "r-ibsuf"], ["ibsMunicipal", "r-ibsmun"]].forEach(([k, id]) => { if ($(id).value.trim()) fd.append(k, $(id).value.trim()); });
+  out.innerHTML = ""; btn.disabled = true; btn.textContent = "Calculando… (arquivos grandes e motor dormindo podem levar alguns minutos)";
+  try {
+    const resp = await fetch("/api/regime-geral/importar", { method: "POST", body: fd });
+    let data = null; try { data = await resp.json(); } catch { /* sem corpo */ }
+    if (!resp.ok) {
+      const d = data?.detail;
+      const linhas = d && Array.isArray(d.linhas) ? `<ul class="errs">${d.linhas.map((l) => `<li>${esc(l)}</li>`).join("")}</ul>` : "";
+      const msg = Array.isArray(d) ? d.map((e) => `${(e.loc || []).slice(1).join(".")}: ${e.msg}`).join("; ") : (typeof d === "string" ? d : d?.mensagem || (d?.errors ? `${d.title} — ` + d.errors.map((e) => `${e.code} ${e.pointer || ""}: ${e.detail || e.title}`).join(" | ") : JSON.stringify(d ?? data)));
+      throw Object.assign(new Error(`HTTP ${resp.status} — ${msg}`), { html: linhas });
+    }
+    out.innerHTML = renderImportacao(data); tabelaImportacao();
+    $("r-soerro").onchange = tabelaImportacao; $("r-csv").onclick = csvImportacao;
+  } catch (e) { out.innerHTML = `<div class="card"><div class="status err">${esc(e.message)}</div>${e.html || ""}</div>`; }
+  finally { btn.disabled = false; btn.textContent = "Importar e calcular"; }
+};
 
 // ---------- aquece os motores (plano free dorme após inatividade) ----------
 async function aquecer(tentativa = 0) {
