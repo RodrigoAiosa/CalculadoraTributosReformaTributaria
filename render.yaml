@@ -1,0 +1,25 @@
+# Blueprint do Render: dois serviços a partir do mesmo Dockerfile.
+# Os motores da Receita usam Java 25 + SQLite; o plano "free" tem 512 MB e dorme
+# após inatividade (a primeira chamada pode levar ~1 min). Para uso real, use "starter".
+services:
+  - type: web
+    name: calculadora-motor-regular
+    runtime: docker
+    dockerContext: ./engine
+    dockerfilePath: ./engine/Dockerfile
+    plan: free
+    healthCheckPath: /api/calculadora/dados-abertos/versao
+    envVars:
+      - key: ENGINE
+        value: regular
+
+  - type: web
+    name: calculadora-motor-simples
+    runtime: docker
+    dockerContext: ./engine
+    dockerfilePath: ./engine/Dockerfile
+    plan: free
+    healthCheckPath: /api/versao
+    envVars:
+      - key: ENGINE
+        value: simples

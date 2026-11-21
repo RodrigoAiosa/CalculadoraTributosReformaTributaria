@@ -1,0 +1,62 @@
+# Calculadora de Tributos — Reforma Tributária (CBS/IBS)
+
+Interface web + API em Python (Vercel) sobre os **motores oficiais da Receita Federal/Serpro**
+(organização [ReceitaFederal](https://github.com/orgs/ReceitaFederal/repositories) no GitHub, licença MIT):
+
+- [`calculadora-rtc-regime-regular`](https://github.com/ReceitaFederal/calculadora-rtc-regime-regular) — CBS, IBS e Imposto Seletivo (regime geral)
+- [`calculadora-rtc-simples-nacional`](https://github.com/ReceitaFederal/calculadora-rtc-simples-nacional) — CBS e IBS no Simples Nacional
+
+Os motores são Java 25 + Spring Boot + SQLite e **não rodam em Vercel Functions**. Por isso o sistema tem duas partes:
+
+```
+navegador ──► Vercel (public/ + api/index.py, FastAPI) ──HTTP──► motores oficiais (engine/, Docker no Render)
+```
+
+A API Python valida a entrada, repassa ao motor (com 1 retry para o motor "acordando"), traduz erros
+e limita as consultas de dados abertos a uma lista fechada. **Nenhuma regra tributária é reimplementada aqui.**
+
+## Estrutura
+
+| Pasta/arquivo | O que é |
+|---|---|
+| `engine/` | Dockerfile que clona os repositórios da Receita, gera o banco com Flyway, compila e sobe o motor escolhido por `ENGINE=regular\|simples` |
+| `render.yaml` | Blueprint do Render com os dois serviços |
+| `docker-compose.yml` | Sobe os dois motores localmente |
+| `api/index.py` | API FastAPI (Vercel Function) |
+| `public/index.html` | Interface (abas Regime regular e Simples Nacional) |
+| `tests/` | Testes da API com os motores simulados |
+
+## Rodar localmente
+
+```bash
+# 1) motores oficiais (primeiro build demora: baixa dependências e gera o banco)
+docker compose up --build          # regular :8080, simples :8082
+
+# 2) API + front
+python -m venv .venv && . .venv/bin/activate
+pip install -r requirements-dev.txt
+export ENGINE_REGULAR_URL=http://localhost:8080 ENGINE_SIMPLES_URL=http://localhost:8082
+uvicorn api.index:app --reload --port 3000   # a API; o front é public/index.html (use `vercel dev` para ver tudo junto)
+
+pytest                              # testes (não precisam dos motores)
+```
+
+## Deploy
+
+1. **Motores no Render:** *New → Blueprint*, aponte para este repositório (usa `render.yaml`). Anote as duas URLs
+   (`https://calculadora-motor-regular.onrender.com` e `...-simples...`). Verifique no Swagger
+   (`<url>/api/swagger-ui.html`) se subiu.
+2. **Front/API na Vercel:** importe o repositório e defina as variáveis de ambiente
+   `ENGINE_REGULAR_URL` e `ENGINE_SIMPLES_URL` (sem barra final e sem `/api`). Deploy.
+3. Abra a URL da Vercel e use *Carregar exemplo* → *Calcular*.
+
+## Pontos de atenção
+
+- **Plano free do Render** (512 MB, dorme por inatividade): a 1ª chamada pode levar ~1 min. Para uso real, use plano pago.
+- **Os motores ficam públicos** (não têm autenticação — o Spring dos projetos libera todas as requisições). Qualquer um que
+  descubra a URL pode chamá-los diretamente. Se isso importar, coloque um proxy/WAF na frente ou restrinja por IP.
+- **Alíquotas:** o motor do regime regular exige `aliquotasNominais` a partir de 2027 e as proíbe antes; para 2026 há
+  alíquotas de referência cadastradas. Resultados com alíquotas informadas saem como `CALCULO_SIMULADO`.
+- **Atualizações da Receita:** o `Dockerfile` clona `main` por padrão. Para builds reproduzíveis, fixe tags com
+  `REGULAR_REF`/`SIMPLES_REF` (build args) e refaça o deploy quando a Receita publicar versões novas.
+- Os valores calculados são **simulações** e não substituem a apuração oficial.

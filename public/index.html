@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Calculadora CBS/IBS — Reforma Tributária</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --ink:#1b2430; --mute:#5d6b7c; --line:#dde2e9; --accent:#0b5cad; --ok:#117a3d; --warn:#9a5b00; --err:#b3261e; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--ink); }
+  header { background:var(--accent); color:#fff; padding:18px 24px; }
+  header h1 { margin:0; font-size:20px; }
+  header p { margin:4px 0 0; opacity:.9; font-size:13px; }
+  main { max-width:1100px; margin:20px auto; padding:0 16px 48px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:16px; }
+  .tabs { display:flex; gap:8px; margin-bottom:16px; }
+  .tabs button { padding:8px 16px; border:1px solid var(--line); background:#fff; border-radius:8px; cursor:pointer; font-size:14px; }
+  .tabs button.on { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:12px; }
+  label { display:block; font-size:12px; color:var(--mute); margin-bottom:3px; }
+  input, select, textarea { width:100%; padding:7px 8px; border:1px solid var(--line); border-radius:6px; font:inherit; background:#fff; }
+  textarea { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12.5px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th { text-align:left; font-weight:600; color:var(--mute); padding:4px 4px; font-size:12px; }
+  td { padding:3px 3px; vertical-align:top; }
+  td input, td select { padding:5px 6px; }
+  .items-wrap { overflow-x:auto; }
+  .row-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; align-items:center; }
+  button.btn { padding:8px 14px; border-radius:8px; border:1px solid var(--line); background:#fff; cursor:pointer; font-size:14px; }
+  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+  button:disabled { opacity:.6; cursor:wait; }
+  .del { border:none; background:none; color:var(--err); cursor:pointer; font-size:16px; }
+  .pill { display:inline-block; padding:2px 8px; border-radius:99px; font-size:12px; font-weight:600; }
+  .pill.ok { background:#e3f4ea; color:var(--ok); } .pill.sim { background:#fff1d6; color:var(--warn); }
+  .pill.err { background:#fde8e6; color:var(--err); } .pill.neutral { background:#eceff3; color:var(--mute); }
+  .status { margin:8px 0; font-size:13px; }
+  .status.err { color:var(--err); } .status.warn { color:var(--warn); }
+  .num { text-align:right; font-variant-numeric:tabular-nums; }
+  details { margin-top:10px; } summary { cursor:pointer; color:var(--accent); font-size:13px; }
+  pre { background:#0f1722; color:#d6e2f0; padding:12px; border-radius:8px; overflow:auto; font-size:12px; max-height:380px; }
+  .hint { font-size:12px; color:var(--mute); margin:6px 0 0; }
+  .errs { margin:4px 0 0; padding-left:18px; color:var(--err); font-size:12.5px; }
+  footer { text-align:center; color:var(--mute); font-size:12px; padding:0 16px 32px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Calculadora de CBS / IBS</h1>
+  <p>Cálculo feito pelos motores oficiais da Receita Federal (repositórios ReceitaFederal no GitHub). Resultado simulado, sem valor fiscal.</p>
+</header>
+<main>
+  <div class="tabs">
+    <button id="tab-regular" class="on" type="button">Regime regular</button>
+    <button id="tab-simples" type="button">Simples Nacional</button>
+  </div>
+
+  <!-- ===================== REGIME REGULAR ===================== -->
+  <section id="p-regular">
+    <div class="card">
+      <div class="grid">
+        <div><label>Data/hora do fato gerador</label><input id="r-dh" value="2027-03-10T10:00:00-03:00"></div>
+        <div><label>UF</label><input id="r-uf" value="RS" maxlength="2"></div>
+        <div><label>Município (código IBGE)</label><input id="r-mun" value="4314902" inputmode="numeric"></div>
+      </div>
+      <div class="grid" style="margin-top:12px">
+        <div><label>Alíquota CBS (%) — obrigatória a partir de 2027</label><input id="r-cbs" value="8.8"></div>
+        <div><label>Alíquota IBS estadual (%)</label><input id="r-ibsuf" value="0.05"></div>
+        <div><label>Alíquota IBS municipal (%)</label><input id="r-ibsmun" value="0.05"></div>
+      </div>
+      <p class="hint">As alíquotas acima são aplicadas a todos os itens. Antes de 2027 o motor <b>proíbe</b> informá-las: deixe os três campos em branco e use data de 2026.</p>
+    </div>
+    <div class="card">
+      <div class="items-wrap"><table id="r-table">
+        <thead><tr><th>Nº</th><th>Tipo</th><th>NCM / NBS</th><th>CST</th><th>cClassTrib</th><th>Base de cálculo</th><th>Qtd.</th><th>Unid.</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+      <div class="row-actions">
+        <button class="btn" type="button" id="r-add">+ Item</button>
+        <button class="btn" type="button" id="r-example">Carregar exemplo</button>
+        <button class="btn primary" type="button" id="r-go">Calcular</button>
+      </div>
+      <details><summary>Editar JSON da operação (avançado: Imposto Seletivo, etc.)</summary>
+        <textarea id="r-json" rows="10" placeholder="Deixe vazio para usar o formulário"></textarea>
+        <div class="row-actions"><button class="btn" type="button" id="r-fill">Gerar JSON do formulário</button><span class="hint">Se esta caixa tiver conteúdo, ela é enviada no lugar do formulário.</span></div>
+      </details>
+    </div>
+    <div id="r-out"></div>
+  </section>
+
+  <!-- ===================== SIMPLES NACIONAL ===================== -->
+  <section id="p-simples" hidden>
+    <div class="card">
+      <div class="grid">
+        <div><label>Data do fato gerador</label><input id="s-data" value="2027-03-15" type="date"></div>
+        <div><label>Documento (tpDoc)</label>
+          <select id="s-tpdoc"><option value="55">55 — NF-e</option><option value="65">65 — NFC-e</option><option value="57">57 — CT-e</option><option value="67">67 — CT-e OS</option><option value="63">63 — BP-e</option><option value="93">93</option><option value="62">62</option><option value="91">91 — NFS-e</option></select></div>
+        <div><label>CRT (docs. exceto NFS-e)</label>
+          <select id="s-crt"><option value="1">1 — Simples Nacional</option><option value="2">2 — Excesso de sublimite</option><option value="3">3 — Regime normal</option><option value="4">4 — MEI</option></select></div>
+        <div><label>opSimpNac (só NFS-e)</label>
+          <select id="s-op"><option value="">—</option><option value="1">1 — Não optante</option><option value="2">2 — MEI</option><option value="3">3 — ME/EPP</option><option value="4">4 — Opção pendente</option></select></div>
+      </div>
+      <div style="margin-top:12px"><label>Alíquotas efetivas do contribuinte (JSON — linha da tabela do PGDAS, em pontos percentuais, como texto)</label>
+        <textarea id="s-aliq" rows="6"></textarea>
+        <p class="hint">Informe só o anexo usado pelos itens. Anexos III–V aceitam também <code>semRedistribuicaoISS</code>. Atividade 09 exige <code>fatorR</code>.</p></div>
+    </div>
+    <div class="card">
+      <div class="items-wrap"><table id="s-table">
+        <thead><tr><th>Nº</th><th>cAtivSN</th><th>cClassTrib</th><th>Tipo</th><th>NCM / NBS</th><th>Base de cálculo</th><th>Valor IS</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+      <div class="row-actions">
+        <button class="btn" type="button" id="s-add">+ Item</button>
+        <button class="btn" type="button" id="s-example">Carregar exemplo</button>
+        <button class="btn primary" type="button" id="s-go">Calcular</button>
+      </div>
+      <p class="hint">Documentos com CRT: base = vProd + vFrete + vSeg + vOutro − vDesc, sem IS; informe o IS já calculado (0.00 se não houver). Exemplo ilustrativo: ajuste ao seu caso.</p>
+    </div>
+    <div id="s-out"></div>
+  </section>
+</main>
+<footer>Os motores de cálculo pertencem à Receita Federal/Serpro (licença MIT). Este projeto é uma interface independente.</footer>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]));
+
+// ---------- abas ----------
+function tab(which) {
+  $("p-regular").hidden = which !== "regular"; $("p-simples").hidden = which !== "simples";
+  $("tab-regular").classList.toggle("on", which === "regular"); $("tab-simples").classList.toggle("on", which === "simples");
+}
+$("tab-regular").onclick = () => tab("regular"); $("tab-simples").onclick = () => tab("simples");
+
+// ---------- linhas de itens ----------
+function rowRegular(v = {}) {
+  const tr = document.createElement("tr");
+  tr.innerHTML = `
+    <td style="width:56px"><input data-k="numero" value="${esc(v.numero ?? "")}" inputmode="numeric"></td>
+    <td style="width:76px"><select data-k="tipo"><option>NCM</option><option>NBS</option></select></td>
+    <td><input data-k="codigo" value="${esc(v.codigo ?? "")}" inputmode="numeric"></td>
+    <td style="width:64px"><input data-k="cst" value="${esc(v.cst ?? "")}" maxlength="3"></td>
+    <td style="width:94px"><input data-k="cClassTrib" value="${esc(v.cClassTrib ?? "")}" maxlength="6"></td>
+    <td><input data-k="baseCalculo" value="${esc(v.baseCalculo ?? "")}"></td>
+    <td style="width:70px"><input data-k="quantidade" value="${esc(v.quantidade ?? "")}"></td>
+    <td style="width:70px"><input data-k="unidade" value="${esc(v.unidade ?? "")}"></td>
+    <td><button class="del" type="button" title="Remover">×</button></td>`;
+  tr.querySelector('[data-k="tipo"]').value = v.tipo || "NCM";
+  tr.querySelector(".del").onclick = () => { tr.remove(); renumber("r-table"); };
+  $("r-table").tBodies[0].appendChild(tr);
+}
+function rowSimples(v = {}) {
+  const tr = document.createElement("tr");
+  tr.innerHTML = `
+    <td style="width:56px"><input data-k="numero" value="${esc(v.numero ?? "")}" inputmode="numeric"></td>
+    <td style="width:80px"><input data-k="cAtivSN" value="${esc(v.cAtivSN ?? "")}" maxlength="2"></td>
+    <td style="width:94px"><input data-k="cClassTrib" value="${esc(v.cClassTrib ?? "")}" maxlength="6"></td>
+    <td style="width:76px"><select data-k="tipo"><option>NCM</option><option>NBS</option></select></td>
+    <td><input data-k="codigo" value="${esc(v.codigo ?? "")}" inputmode="numeric"></td>
+    <td><input data-k="baseCalculo" value="${esc(v.baseCalculo ?? "")}"></td>
+    <td style="width:90px"><input data-k="valorImpostoSeletivo" value="${esc(v.valorImpostoSeletivo ?? "0.00")}"></td>
+    <td><button class="del" type="button" title="Remover">×</button></td>`;
+  tr.querySelector('[data-k="tipo"]').value = v.tipo || "NCM";
+  tr.querySelector(".del").onclick = () => { tr.remove(); renumber("s-table"); };
+  $("s-table").tBodies[0].appendChild(tr);
+}
+function renumber(tableId) {
+  [...$(tableId).tBodies[0].rows].forEach((r, i) => { r.querySelector('[data-k="numero"]').value = i + 1; });
+}
+const readRows = (tableId) => [...$(tableId).tBodies[0].rows].map((tr) => {
+  const o = {}; tr.querySelectorAll("[data-k]").forEach((el) => { o[el.dataset.k] = el.value.trim(); }); return o;
+});
+
+// ---------- exemplos (ilustrativos; vêm da documentação dos motores) ----------
+$("r-add").onclick = () => { rowRegular({ numero: $("r-table").tBodies[0].rows.length + 1, cst: "000" }); };
+$("r-example").onclick = () => {
+  $("r-table").tBodies[0].innerHTML = "";
+  rowRegular({ numero: 1, tipo: "NCM", codigo: "10063021", cst: "200", cClassTrib: "200003", baseCalculo: "100.00", quantidade: "20", unidade: "KG" });
+  rowRegular({ numero: 2, tipo: "NBS", codigo: "122011200", cst: "200", cClassTrib: "200028", baseCalculo: "1200.00" });
+};
+$("s-add").onclick = () => { rowSimples({ numero: $("s-table").tBodies[0].rows.length + 1 }); };
+$("s-example").onclick = () => {
+  $("s-table").tBodies[0].innerHTML = "";
+  rowSimples({ numero: 1, cAtivSN: "01", cClassTrib: "000001", tipo: "NCM", codigo: "22030000", baseCalculo: "10000.00", valorImpostoSeletivo: "0.00" });
+  $("s-aliq").value = JSON.stringify({ anexoI: { pCBSSN: "1.1612", pIBSSN: "0.0129" } }, null, 2);
+};
+
+// ---------- payloads ----------
+function payloadRegular() {
+  const num = (s) => (s === "" ? undefined : Number(s.replace(",", ".")));
+  const aliq = {}; const c = num($("r-cbs").value), u = num($("r-ibsuf").value), m = num($("r-ibsmun").value);
+  if (c !== undefined) aliq.cbs = c; if (u !== undefined) aliq.ibsEstadual = u; if (m !== undefined) aliq.ibsMunicipal = m;
+  return {
+    dhFatoGerador: $("r-dh").value.trim(), municipio: Number($("r-mun").value), uf: $("r-uf").value.trim().toUpperCase(),
+    itens: readRows("r-table").map((r) => {
+      const it = { numero: Number(r.numero), cst: r.cst, cClassTrib: r.cClassTrib, baseCalculo: num(r.baseCalculo) };
+      if (r.codigo) it[r.tipo.toLowerCase()] = r.codigo;
+      if (r.quantidade) it.quantidade = num(r.quantidade);
+      if (r.unidade) it.unidade = r.unidade;
+      if (Object.keys(aliq).length) it.aliquotasNominais = aliq;
+      return it;
+    }),
+  };
+}
+function payloadSimples() {
+  const crt = $("s-crt").value, nfse = $("s-tpdoc").value === "91";
+  const p = { data: $("s-data").value, tpDoc: $("s-tpdoc").value, itens: readRows("s-table").map((r) => {
+    const it = { numero: Number(r.numero), cAtivSN: r.cAtivSN || undefined, cClassTrib: r.cClassTrib, baseCalculo: r.baseCalculo, valorImpostoSeletivo: r.valorImpostoSeletivo || undefined };
+    if (r.codigo) it[r.tipo.toLowerCase()] = r.codigo;
+    return it;
+  }) };
+  if (nfse) { if ($("s-op").value) p.opSimpNac = $("s-op").value; } else { p.CRT = crt; }
+  const raw = $("s-aliq").value.trim();
+  if (raw) p.aliquotasEfetivas = JSON.parse(raw);
+  return p;
+}
+$("r-fill").onclick = () => { $("r-json").value = JSON.stringify(payloadRegular(), null, 2); };
+
+// ---------- chamada à API ----------
+async function post(url, body) {
+  const resp = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  let data = null; try { data = await resp.json(); } catch { /* corpo vazio */ }
+  if (!resp.ok) {
+    const d = data?.detail;
+    const msg = Array.isArray(d) ? d.map((e) => `${(e.loc || []).slice(1).join(".")}: ${e.msg}`).join("; ") : (typeof d === "string" ? d : JSON.stringify(d ?? data));
+    throw new Error(`HTTP ${resp.status} — ${msg}`);
+  }
+  return data;
+}
+
+// ---------- renderização ----------
+const ESTADO = { CALCULADO: "ok", CALCULO_SIMULADO: "sim", INCONSISTENCIA_ENTRADA: "err", FALHA_TECNICA: "err", NAO_IMPLEMENTADO: "neutral", NAO_CALCULADO: "neutral" };
+function itemRow(o, values) {
+  const erros = (o.erros || []).map((e) => `<li><b>${esc(e.code)}</b> ${esc(e.title)} — ${esc(e.detail)} <span class="hint">${esc(e.pointer || "")}</span></li>`).join("");
+  return `<tr><td>${esc(o.nObj ?? o.numero ?? "")}</td><td><span class="pill ${ESTADO[o.estadoItem] || "neutral"}">${esc(o.estadoItem || "—")}</span>${erros ? `<ul class="errs">${erros}</ul>` : ""}</td>${values}</tr>`;
+}
+function renderRegular(res) {
+  const r = res.resultado || {};
+  const rows = (r.objetos || []).map((o) => {
+    const g = o.tribCalc?.IBSCBS?.gIBSCBS || {};
+    return itemRow(o, `<td class="num">${esc(g.vBC ?? "")}</td><td class="num">${esc(g.gCBS?.vCBS ?? "")}</td><td class="num">${esc(g.vIBS ?? "")}</td><td class="num">${esc(o.tribCalc?.IS?.vIS ?? o.tribCalc?.IS?.gIS?.vIS ?? "")}</td>`);
+  }).join("");
+  const t = r.total?.tribCalc || {};
+  return `<div class="card">
+    ${res.aviso ? `<div class="status warn">Aviso do motor: ${esc(res.aviso)}</div>` : ""}
+    <table><thead><tr><th>Item</th><th>Estado</th><th class="num">Base</th><th class="num">CBS</th><th class="num">IBS</th><th class="num">IS</th></tr></thead><tbody>${rows}</tbody>
+    <tfoot><tr><th colspan="2">Total (só itens calculados)</th><th class="num">${esc(t.IBSCBSTot?.vBCIBSCBS ?? "")}</th><th class="num">${esc(t.IBSCBSTot?.gCBS?.vCBS ?? "")}</th><th class="num">${esc(t.IBSCBSTot?.gIBS?.vIBS ?? "")}</th><th class="num">${esc(t.ISTot?.vIS ?? "")}</th></tr></tfoot></table>
+    <details><summary>Resposta completa (com memória de cálculo)</summary><pre>${esc(JSON.stringify(r, null, 2))}</pre></details></div>`;
+}
+function renderSimples(res) {
+  const r = res.resultado || {};
+  const lista = r.objetos || r.itens || [];
+  const rows = lista.map((o) => itemRow(o, `<td><details><summary>detalhe</summary><pre>${esc(JSON.stringify(o, null, 2))}</pre></details></td>`)).join("");
+  const erroGlobal = r.erros ? `<ul class="errs">${r.erros.map((e) => `<li><b>${esc(e.code)}</b> ${esc(e.title)} — ${esc(e.detail)}</li>`).join("")}</ul>` : "";
+  return `<div class="card">${erroGlobal}
+    ${rows ? `<table><thead><tr><th>Item</th><th>Estado</th><th>Cálculo</th></tr></thead><tbody>${rows}</tbody></table>` : ""}
+    <details ${rows ? "" : "open"}><summary>Resposta completa</summary><pre>${esc(JSON.stringify(r, null, 2))}</pre></details></div>`;
+}
+
+async function run(btn, out, build, url, render) {
+  out.innerHTML = ""; btn.disabled = true; btn.textContent = "Calculando… (o motor pode levar ~1 min para acordar)";
+  try { out.innerHTML = render(await post(url, build())); }
+  catch (e) { out.innerHTML = `<div class="card"><div class="status err">${esc(e.message)}</div></div>`; }
+  finally { btn.disabled = false; btn.textContent = "Calcular"; }
+}
+$("r-go").onclick = () => run($("r-go"), $("r-out"), () => ($("r-json").value.trim() ? JSON.parse($("r-json").value) : payloadRegular()), "/api/regime-geral/calcular", renderRegular);
+$("s-go").onclick = () => run($("s-go"), $("s-out"), payloadSimples, "/api/simples-nacional/calcular", renderSimples);
+
+$("r-example").click(); $("s-example").click();
+</script>
+</body>
+</html>

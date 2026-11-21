@@ -1,0 +1,20 @@
+# Sobe os dois motores oficiais localmente.
+#   docker compose up --build
+# Regime regular:  http://localhost:8080/api/swagger-ui.html
+# Simples Nacional: http://localhost:8082/api/swagger-ui.html
+services:
+  motor-regular:
+    build:
+      context: ./engine
+    environment:
+      ENGINE: regular
+    ports:
+      - "8080:8080"
+
+  motor-simples:
+    build:
+      context: ./engine
+    environment:
+      ENGINE: simples
+    ports:
+      - "8082:8082"
