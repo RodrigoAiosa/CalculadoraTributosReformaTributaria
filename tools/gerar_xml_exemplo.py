@@ -19,23 +19,23 @@ ALIQ = {"pCBS": "0.9", "pIBSUF": "0.05", "pIBSMun": "0.05"}  # as mesmas alíquo
 
 # (NCM, descrição, CST, cClassTrib, valor)  — pares validados no motor
 REGULAR_OK = [
-    ("22030000", "Cerveja de malte", "000", "000001", "1000.00"),
-    ("84713012", "Notebook", "000", "000001", "4500.00"),
+    ("84191100", "Aquecedor de agua a gas, instantaneo", "000", "000001", "1000.00"),
+    ("85176229", "Aparelho de telecomunicacao", "000", "000001", "4500.00"),
     ("10063021", "Arroz parboilizado", "200", "200003", "100.00"),
-    ("61091000", "Camiseta de algodao", "000", "000001", "350.50"),
-    ("94031000", "Movel de metal para escritorio", "000", "000001", "2890.90"),
-    ("39231090", "Caixa plastica", "000", "000001", "180.00"),
+    ("95067000", "Patins de rodas", "000", "000001", "350.50"),
+    ("51122010", "Tecido de la", "000", "000001", "2890.90"),
+    ("85012000", "Motor universal", "000", "000001", "180.00"),
 ]
 REGULAR_DIV = [
-    ("85171231", "Telefone celular", "000", "000001", "2200.00"),
-    ("61091000", "Camiseta de algodao", "000", "000001", "700.00"),
-    ("22030000", "Cerveja de malte", "000", "000001", "500.00"),
-    ("94031000", "Movel de metal para escritorio", None, None, "900.00"),
+    ("85176229", "Aparelho de telecomunicacao", "000", "000001", "2200.00"),
+    ("95067000", "Patins de rodas", "000", "000001", "700.00"),
+    ("84191100", "Aquecedor de agua a gas, instantaneo", "000", "000001", "500.00"),
+    ("85012000", "Motor universal (sem grupo IBSCBS na nota)", None, None, "900.00"),
 ]
 SIMPLES = [
-    ("22030000", "Cerveja de malte", "000", "000001", "10000.00"),
-    ("61091000", "Camiseta de algodao", "000", "000001", "2500.00"),
-    ("39231090", "Caixa plastica", "000", "000001", "800.00"),
+    ("95067000", "Patins de rodas", "000", "000001", "10000.00"),
+    ("51122010", "Tecido de la", "000", "000001", "2500.00"),
+    ("85012000", "Motor universal", "000", "000001", "800.00"),
 ]
 
 
