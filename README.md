@@ -110,3 +110,11 @@ tempo restante. Sem `progresso`, o comportamento é o de antes (JSON único). Er
 - Medido ao vivo: ~20 ms por item e **sem ganho com chamadas paralelas** (o motor no plano gratuito do Render tem pouca CPU),
   então 1.000 itens levam ~20 s. Para acelerar de verdade, o caminho é um plano pago do Render para os motores (mais CPU,
   e sem dormir): o tempo cai em proporção à CPU e a espera de 1–3 min do primeiro acesso desaparece.
+
+## Motores dormindo (plano gratuito do Render)
+
+O Render gratuito desliga o serviço após ~15 min sem tráfego e leva 1–3 min para religar. Duas medidas:
+- A tela acorda os motores ao abrir a página, trocar de aba, escolher um arquivo e ao voltar para a janela.
+- `.github/workflows/manter-motores-acordados.yml` chama `/api/aquecer` a cada 10 min, seg–sáb, 08h–20h (Brasília). Fora desse
+  horário os motores dormem de propósito para caber nas ~750 horas/mês do plano gratuito. O GitHub pode atrasar execuções
+  agendadas e pausa workflows de repositórios sem atividade por 60 dias (reative em *Actions*). Para eliminar a espera de vez, use plano pago no Render.

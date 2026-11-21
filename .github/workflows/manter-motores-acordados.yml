@@ -1,0 +1,15 @@
+# Mantém os motores do Render acordados no horário comercial (o plano gratuito dorme após ~15 min sem uso).
+# Seg–sáb, 08h–20h de Brasília (11h–23h UTC), a cada 10 min. Fora desse horário os motores dormem de propósito:
+# o plano gratuito tem ~750 horas/mês para todos os serviços, e dois motores 24h/dia passariam disso.
+name: Manter motores acordados
+on:
+  schedule:
+    - cron: "*/10 11-22 * * 1-6"
+  workflow_dispatch: {}
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Acordar os motores
+        run: |
+          curl -fsS --max-time 60 "https://calculadora-tributos-reforma-tribut.vercel.app/api/aquecer" || echo "motores ainda acordando"

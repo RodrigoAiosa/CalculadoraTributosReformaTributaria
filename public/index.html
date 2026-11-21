@@ -339,7 +339,10 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]));
 
 // ---------- abas ----------
+const acordar = () => { if ($("motores").dataset.s !== "ok") { aquecendo = false; aquecer(); } };
+document.addEventListener("visibilitychange", () => { if (!document.hidden) acordar(); });
 function tab(which) {
+  acordar();
   for (const k of ["regular", "simples", "xml"]) {
     $("p-" + k).hidden = which !== k;
     $("tab-" + k).classList.toggle("on", which === k); $("tab-" + k).setAttribute("aria-selected", which === k);
@@ -671,7 +674,7 @@ document.querySelectorAll(".drop").forEach((box) => {
     box.classList.toggle("has", fs.length > 0);
     nome.textContent = fs.length > 1 ? `${fs.length} arquivos selecionados` : fs[0]?.name || "";
   };
-  input.addEventListener("change", mostrar);
+  input.addEventListener("change", () => { mostrar(); acordar(); });
   ["dragenter", "dragover"].forEach((ev) => box.addEventListener(ev, (e) => { e.preventDefault(); box.classList.add("over"); }));
   ["dragleave", "drop"].forEach((ev) => box.addEventListener(ev, (e) => { e.preventDefault(); box.classList.remove("over"); }));
   box.addEventListener("drop", (e) => {
@@ -767,16 +770,18 @@ function enviarComProgresso(url, fd, out) {
 }
 
 // ---------- aquece os motores (plano free dorme após inatividade) ----------
+let aquecendo = false;
 async function aquecer(tentativa = 0) {
   const el = $("motores");
+  if (tentativa === 0) { if (aquecendo) return; aquecendo = true; }
   try {
     const r = await (await fetch("/api/aquecer")).json();
     const pronto = r.regular && r.simples;
     el.dataset.s = pronto ? "ok" : "wait";
     el.textContent = pronto ? "Motores prontos" : "Acordando os motores… (até 3 minutos)";
     el.title = `Regime regular: ${r.regular ? "pronto" : "acordando"} · Simples Nacional: ${r.simples ? "pronto" : "acordando"}`;
-    if (!pronto && tentativa < 30) setTimeout(() => aquecer(tentativa + 1), 8000);
-  } catch { el.dataset.s = "off"; el.textContent = "Não foi possível verificar os motores"; }
+    if (!pronto && tentativa < 30) setTimeout(() => aquecer(tentativa + 1), 8000); else aquecendo = false;
+  } catch { el.dataset.s = "off"; el.textContent = "Não foi possível verificar os motores"; aquecendo = false; }
 }
 aquecer();
 </script>
