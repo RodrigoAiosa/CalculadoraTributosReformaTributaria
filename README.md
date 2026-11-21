@@ -50,6 +50,17 @@ pytest                              # testes (não precisam dos motores)
    `ENGINE_REGULAR_URL` e `ENGINE_SIMPLES_URL` (sem barra final e sem `/api`). Deploy.
 3. Abra a URL da Vercel e use *Carregar exemplo* → *Calcular*.
 
+## Importação de produtos (.xlsx)
+
+Na aba *Regime regular* o usuário sobe uma planilha em vez de digitar os itens (a digitação manual fica recolhida, para poucos itens).
+
+- **Colunas obrigatórias:** `Tipo` (NCM ou NBS), `NCM / NBS`, `CST`, `cClassTrib`, `Base de cálculo`. Opcionais: `Descrição`, `Quantidade`, `Unidade`.
+- Limites: 5.000 produtos e 10 MB. A API divide em blocos de 100 itens (uma NF-e aceita até 990) e soma os totais.
+- Linhas inválidas são listadas com o número da linha e **nada é enviado ao motor**. Zeros à esquerda do NCM perdidos pelo Excel são recompostos.
+- **Produtos sujeitos a Imposto Seletivo** exigem dados de IS na operação e voltam com erro `REG-013`; ainda não há colunas de IS na planilha.
+- `GET /api/modelo.xlsx` baixa o modelo; `public/exemplos/produtos-1000.xlsx` é um exemplo com 1.000 produtos
+  (gerado por `tools/gerar_exemplo.py` a partir da base oficial e validado no motor: 1.000/1.000 calculados em 21/11/2026).
+
 ## Pontos de atenção
 
 - **Plano free do Render** (512 MB, dorme por inatividade): a 1ª chamada pode levar ~1 min. Para uso real, use plano pago.
