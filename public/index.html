@@ -69,6 +69,7 @@
   <div class="tabs">
     <button id="tab-regular" class="on" type="button">Regime regular</button>
     <button id="tab-simples" type="button">Simples Nacional</button>
+    <button id="tab-xml" type="button">XML de NF-e</button>
   </div>
 
   <!-- ===================== REGIME REGULAR ===================== -->
@@ -156,6 +157,26 @@
     </details>
     <div id="s-out"></div>
   </section>
+
+  <!-- ===================== XML DE NF-e ===================== -->
+  <section id="p-xml" hidden>
+    <div class="card">
+      <b>Conferir notas fiscais (XML)</b>
+      <p class="hint">Envie um ou mais XML de NF-e/NFC-e (modelos 55 e 65) ou um .zip com vários. A ferramenta lê data, município, itens, NCM, CST/cClassTrib e alíquotas da própria nota, calcula CBS/IBS no motor oficial e <b>compara com o que a nota destacou</b>. Notas de optantes do Simples (CRT 1, 2 e 4) precisam das alíquotas efetivas abaixo. Até 200 notas e 40 MB por envio.</p>
+      <input type="file" id="x-file" accept=".xml,.zip" multiple style="margin-top:8px">
+      <div class="grid" style="margin-top:12px">
+        <div><label>Tolerância (R$)</label><input id="x-tol" value="0.01"></div>
+        <div><label>cAtivSN (notas do Simples)</label><input id="x-ativ" value="01"></div>
+      </div>
+      <div style="margin-top:12px"><label>Alíquotas efetivas (JSON — só para notas do Simples)</label>
+        <textarea id="x-aliq" rows="3">{"anexoI": {"pCBSSN": "1.1612", "pIBSSN": "0.0129"}}</textarea></div>
+      <div class="row-actions">
+        <button class="btn primary" type="button" id="x-go">Ler e conferir</button>
+        <a class="btn" href="/exemplos/nfe-exemplo.zip">Baixar XMLs de exemplo</a>
+      </div>
+    </div>
+    <div id="x-out"></div>
+  </section>
 </main>
 <footer>Os motores de cálculo pertencem à Receita Federal/Serpro (licença MIT). Este projeto é uma interface independente.</footer>
 
@@ -165,10 +186,9 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&":"&amp;", "<"
 
 // ---------- abas ----------
 function tab(which) {
-  $("p-regular").hidden = which !== "regular"; $("p-simples").hidden = which !== "simples";
-  $("tab-regular").classList.toggle("on", which === "regular"); $("tab-simples").classList.toggle("on", which === "simples");
+  for (const k of ["regular", "simples", "xml"]) { $("p-" + k).hidden = which !== k; $("tab-" + k).classList.toggle("on", which === k); }
 }
-$("tab-regular").onclick = () => tab("regular"); $("tab-simples").onclick = () => tab("simples");
+$("tab-regular").onclick = () => tab("regular"); $("tab-simples").onclick = () => tab("simples"); $("tab-xml").onclick = () => tab("xml");
 
 // ---------- linhas de itens ----------
 function rowRegular(v = {}) {
@@ -428,6 +448,45 @@ $("s-import").onclick = async () => {
     $("s-soerro").onchange = tabelaSimples; $("s-csv").onclick = csvSimples;
   } catch (e) { out.innerHTML = `<div class="card"><div class="status err">${esc(e.message)}</div>${e.html || ""}</div>`; }
   finally { btn.disabled = false; btn.textContent = "Importar e calcular"; }
+};
+
+
+// ---------- leitura de XML de NF-e ----------
+let ultimaXml = null;
+const STX = { CONFERE: "ok", DIVERGENTE: "err", SEM_DESTAQUE: "sim", NAO_CALCULADO: "err", PULADO: "neutral" };
+function renderXml(j) {
+  ultimaXml = j; const r = j.resumo, t = j.totais;
+  const chips = Object.entries(r.porStatus).map(([k, v]) => `<span class="pill ${STX[k] || "neutral"}">${esc(k)}: ${v}</span>`).join("");
+  const dif = (a, b) => fmtMoeda(Number(a) - Number(b));
+  const notas = j.notas.map((n) => {
+    if (n.erro) return `<div class="card"><b>${esc(n.arquivo)}</b><div class="status err">${esc(n.erro)}</div></div>`;
+    const ch = Object.entries(n.contagem).map(([k, v]) => `<span class="pill ${STX[k] || "neutral"}">${esc(k)}: ${v}</span>`).join("");
+    const linhas = n.itens.map((i) => `<tr><td>${esc(i.nItem)}</td><td>${esc(i.ncm)} <span class="hint">${esc(i.produto)}</span></td><td>${esc(i.cst)}/${esc(i.cClassTrib)}</td>
+      <td><span class="pill ${STX[i.status] || "neutral"}">${esc(i.status)}</span>${i.motivo ? `<div class="hint">${esc(i.motivo)}</div>` : ""}${(i.erros || []).map((e) => `<div class="hint" style="color:var(--err)"><b>${esc(e.code)}</b> ${esc(e.title)}</div>`).join("")}</td>
+      <td class="num">${fmtMoeda(i.calc?.vCBS)}</td><td class="num">${fmtMoeda(i.xml.vCBS)}</td><td class="num">${fmtMoeda(i.calc?.vIBS)}</td><td class="num">${fmtMoeda(i.xml.vIBS)}</td></tr>`).join("");
+    return `<div class="card"><b>${esc(n.arquivo)}</b> <span class="hint">NF ${esc(n.nNF)} · modelo ${esc(n.mod)} · CRT ${esc(n.crt)} (${esc(n.regime || "?")}) · ${esc(n.dhEmi.slice(0, 10))}</span>
+      <div class="chips" style="margin:8px 0">${ch}</div>
+      <div class="scroll"><table><thead><tr><th>Item</th><th>Produto</th><th>CST/cClassTrib</th><th>Situação</th><th class="num">CBS calculada</th><th class="num">CBS na nota</th><th class="num">IBS calculado</th><th class="num">IBS na nota</th></tr></thead><tbody>${linhas}</tbody></table></div></div>`;
+  }).join("");
+  return `<div class="card"><b>${r.notas} nota(s), ${r.itens} itens${r.comErroLeitura ? ` — ${r.comErroLeitura} arquivo(s) não lido(s)` : ""}</b>
+    <div class="chips" style="margin:8px 0">${chips}</div>
+    ${j.avisos.length ? `<div class="status warn">Cálculo simulado (aviso do motor: ${esc(j.avisos.join(", "))})</div>` : ""}
+    <div class="grid" style="margin:8px 0"><div><label>CBS calculada</label><b>${fmtMoeda(t.calcCBS)}</b></div><div><label>CBS na nota</label><b>${fmtMoeda(t.xmlCBS)}</b></div><div><label>IBS calculado</label><b>${fmtMoeda(t.calcIBS)}</b></div><div><label>IBS na nota</label><b>${fmtMoeda(t.xmlIBS)}</b></div></div>
+    <p class="hint">Diferença total: CBS ${dif(t.calcCBS, t.xmlCBS)} · IBS ${dif(t.calcIBS, t.xmlIBS)} (calculado − nota; só itens calculados).</p></div>${notas}`;
+}
+$("x-go").onclick = async () => {
+  const out = $("x-out"), btn = $("x-go"), fs = $("x-file").files;
+  if (!fs.length) { out.innerHTML = `<div class="card"><div class="status err">Escolha ao menos um .xml ou .zip (ou baixe os XMLs de exemplo).</div></div>`; return; }
+  const fd = new FormData(); for (const f of fs) fd.append("arquivos", f);
+  fd.append("tolerancia", $("x-tol").value.trim() || "0.01"); fd.append("cAtivSN", $("x-ativ").value.trim() || "01"); fd.append("aliquotasEfetivas", $("x-aliq").value.trim());
+  out.innerHTML = ""; btn.disabled = true; btn.textContent = "Calculando… (motor dormindo pode levar alguns minutos)";
+  try {
+    const resp = await fetch("/api/xml/importar", { method: "POST", body: fd });
+    let data = null; try { data = await resp.json(); } catch { /* sem corpo */ }
+    if (!resp.ok) { const d = data?.detail; throw new Error(`HTTP ${resp.status} — ${Array.isArray(d) ? d.map((e) => `${(e.loc || []).slice(1).join(".")}: ${e.msg}`).join("; ") : typeof d === "string" ? d : JSON.stringify(d ?? data)}`); }
+    out.innerHTML = renderXml(data);
+  } catch (e) { out.innerHTML = `<div class="card"><div class="status err">${esc(e.message)}</div></div>`; }
+  finally { btn.disabled = false; btn.textContent = "Ler e conferir"; }
 };
 
 // ---------- aquece os motores (plano free dorme após inatividade) ----------

@@ -561,3 +561,263 @@ def modelo_simples() -> StreamingResponse:
     buf.seek(0)
     return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                              headers={"Content-Disposition": 'attachment; filename="modelo-produtos-simples.xlsx"'})
+
+
+# ---------------------------------------------------------------------------
+# Leitura de XML de NF-e/NFC-e (modelos 55 e 65): calcula pelo motor e confere com o que a nota destacou
+# ---------------------------------------------------------------------------
+import json  # noqa: E402
+import zipfile  # noqa: E402
+from xml.etree import ElementTree as ET  # noqa: E402
+
+MAX_NOTAS = 200
+MAX_XML_BYTES = 2 * 1024 * 1024          # por XML
+MAX_TOTAL_BYTES = 40 * 1024 * 1024       # soma de tudo, já descompactado
+CRT_REGULAR = {"3"}
+CRT_SIMPLES = {"1", "2", "4"}
+
+
+def _ln(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1]
+
+
+def _filho(el: ET.Element | None, *caminho: str) -> ET.Element | None:
+    """Desce pelos filhos diretos, ignorando namespace."""
+    for nome in caminho:
+        if el is None:
+            return None
+        el = next((c for c in el if _ln(c.tag) == nome), None)
+    return el
+
+
+def _txt(el: ET.Element | None, *caminho: str) -> str:
+    n = _filho(el, *caminho)
+    return (n.text or "").strip() if n is not None and n.text else ""
+
+
+def _dx(v: str) -> Decimal | None:
+    try:
+        return Decimal(v) if v else None
+    except InvalidOperation:
+        return None
+
+
+def ler_nfe(conteudo: bytes) -> dict[str, Any]:
+    """Extrai de um XML de NF-e/NFC-e o cabeçalho e os itens. Levanta ValueError com mensagem legível."""
+    if len(conteudo) > MAX_XML_BYTES:
+        raise ValueError("XML maior que 2 MB")
+    if re.search(rb"<!(DOCTYPE|ENTITY)", conteudo, re.I):
+        raise ValueError("XML com DOCTYPE/ENTITY não é aceito (segurança)")
+    try:
+        raiz = ET.fromstring(conteudo)
+    except ET.ParseError as exc:
+        raise ValueError(f"XML inválido: {exc}") from exc
+    inf = next((e for e in raiz.iter() if _ln(e.tag) == "infNFe"), None)
+    if inf is None:
+        raise ValueError("Não é uma NF-e/NFC-e (elemento infNFe não encontrado)")
+    ide, emit = _filho(inf, "ide"), _filho(inf, "emit")
+    mod = _txt(ide, "mod")
+    if mod not in ("55", "65"):
+        raise ValueError(f"Modelo {mod or '?'} não suportado (aceita 55 e 65)")
+    dh = _txt(ide, "dhEmi")
+    if not re.match(r"^\d{4}-\d{2}-\d{2}", dh):
+        raise ValueError("dhEmi ausente ou inválida")
+    uf, mun = _txt(emit, "enderEmit", "UF"), _txt(ide, "cMunFG")
+    if not re.fullmatch(r"[A-Z]{2}", uf) or not re.fullmatch(r"\d{7}", mun):
+        raise ValueError("UF do emitente ou cMunFG ausente/inválido")
+    itens = []
+    for det in (c for c in inf if _ln(c.tag) == "det"):
+        prod, ib = _filho(det, "prod"), _filho(det, "imposto", "IBSCBS")
+        g = _filho(ib, "gIBSCBS")
+        extra = sum((_dx(_txt(prod, k)) or Decimal("0")) * s for k, s in (("vProd", 1), ("vFrete", 1), ("vSeg", 1), ("vOutro", 1), ("vDesc", -1)))
+        vibs = _dx(_txt(g, "vIBS"))
+        if vibs is None and g is not None:
+            partes = [_dx(_txt(g, "gIBSUF", "vIBSUF")), _dx(_txt(g, "gIBSMun", "vIBSMun"))]
+            vibs = sum((p for p in partes if p is not None), Decimal("0")) if any(p is not None for p in partes) else None
+        itens.append({
+            "nItem": det.get("nItem") or str(len(itens) + 1),
+            "ncm": _txt(prod, "NCM"), "xProd": _txt(prod, "xProd"),
+            "qCom": _dx(_txt(prod, "qCom")), "uCom": _txt(prod, "uCom"),
+            "base": extra, "cst": _txt(ib, "CST"), "cClassTrib": _txt(ib, "cClassTrib"),
+            "xmlBC": _dx(_txt(g, "vBC")), "xmlCBS": _dx(_txt(g, "gCBS", "vCBS")), "xmlIBS": vibs,
+            "xmlIS": _dx(_txt(_filho(det, "imposto", "IS"), "vIS")),
+            "pCBS": _dx(_txt(g, "gCBS", "pCBS")), "pIBSUF": _dx(_txt(g, "gIBSUF", "pIBSUF")) or _dx(_txt(g, "gIBSUF", "pIBS")),
+            "pIBSMun": _dx(_txt(g, "gIBSMun", "pIBSMun")) or _dx(_txt(g, "gIBSMun", "pIBS")),
+        })
+    if not itens:
+        raise ValueError("Nota sem itens (det)")
+    return {
+        "chave": (inf.get("Id") or "").replace("NFe", ""), "mod": mod, "nNF": _txt(ide, "nNF"), "dhEmi": dh,
+        "uf": uf, "municipio": int(mun), "crt": _txt(emit, "CRT"), "emitente": _txt(emit, "xNome"), "itens": itens,
+    }
+
+
+def _status(it: dict[str, Any], calc: dict[str, Any], ok_estados: set[str], tol: Decimal) -> tuple[str, dict[str, Any]]:
+    dif = {}
+    if calc["estado"] not in ok_estados:
+        return "NAO_CALCULADO", dif
+    pares = [("vCBS", it["xmlCBS"], _dec(calc["vCBS"])), ("vIBS", it["xmlIBS"], _dec(calc["vIBS"]))]
+    if all(x is None for _, x, _c in pares):
+        return "SEM_DESTAQUE", dif
+    diverge = False
+    for nome, xml, c in pares:
+        if xml is not None:
+            d = c - xml
+            dif[nome] = f"{d:.2f}"
+            diverge = diverge or abs(d) > tol
+    return ("DIVERGENTE" if diverge else "CONFERE"), dif
+
+
+def _processar_nota(nota: dict[str, Any], cativ: str, aliq_sn: dict[str, Any] | None, tol: Decimal) -> dict[str, Any]:
+    itens = nota["itens"]
+    saida: dict[int, dict[str, Any]] = {}
+    pular: dict[int, str] = {}
+    regime = "regular" if nota["crt"] in CRT_REGULAR else "simples" if nota["crt"] in CRT_SIMPLES else None
+    aviso = None
+    ano = int(nota["dhEmi"][:4])
+    for i, it in enumerate(itens):
+        if regime is None:
+            pular[i] = f"CRT {nota['crt'] or '?'} não suportado"
+        elif not re.fullmatch(r"\d{8}", it["ncm"]):
+            pular[i] = "NCM ausente ou diferente de 8 dígitos (o motor calcula só itens com NCM válido)"
+        elif not it["cClassTrib"] or (regime == "regular" and not it["cst"]):
+            pular[i] = "A nota não traz CST/cClassTrib do IBS/CBS neste item"
+    if regime == "simples" and not aliq_sn:
+        pular = {i: "Informe as alíquotas efetivas do Simples para calcular notas de optantes" for i in range(len(itens))}
+    ok = [i for i in range(len(itens)) if i not in pular]
+
+    respostas: list[dict[str, Any]] = []
+    if ok and regime == "regular":
+        grupos: dict[tuple, list[int]] = {}
+        for i in ok:
+            it = itens[i]
+            chave = (it["pCBS"], it["pIBSUF"], it["pIBSMun"]) if ano >= 2027 else ()
+            grupos.setdefault(chave, []).append(i)
+        for chave, idx in grupos.items():
+            aliq = {}
+            if chave and None not in chave:
+                aliq = {"cbs": float(chave[0]), "ibsEstadual": float(chave[1]), "ibsMunicipal": float(chave[2])}
+            ctx = {"dh": nota["dhEmi"], "municipio": nota["municipio"], "uf": nota["uf"], "aliquotas": aliq}
+            for k in range(0, len(idx), CHUNK):
+                parte = idx[k : k + CHUNK]
+                bloco = [{"linha": i, "tipo": "NCM", "codigo": itens[i]["ncm"], "cst": itens[i]["cst"].zfill(3), "cClassTrib": itens[i]["cClassTrib"].zfill(6),
+                          "base": itens[i]["xmlBC"] if itens[i]["xmlBC"] is not None else itens[i]["base"],
+                          "quantidade": itens[i]["qCom"], "unidade": itens[i]["uCom"] or None} for i in parte]
+                resp = _bloco(ctx, bloco)
+                respostas.append(resp)
+                for r in _resumir(bloco, resp):
+                    saida[r["linha"]] = r
+        ok_estados = ESTADOS_CALCULADOS
+    elif ok and regime == "simples":
+        ctx = {"data": nota["dhEmi"][:10], "tpDoc": nota["mod"], "CRT": nota["crt"], "aliquotas": aliq_sn}
+        for k in range(0, len(ok), CHUNK):
+            parte = ok[k : k + CHUNK]
+            bloco = [{"linha": i, "tipo": "NCM", "codigo": itens[i]["ncm"], "cativ": cativ, "cClassTrib": itens[i]["cClassTrib"].zfill(6),
+                      "base": itens[i]["base"], "valoris": itens[i]["xmlIS"] or Decimal("0")} for i in parte]
+            resp = _bloco_simples(ctx, bloco)
+            respostas.append(resp)
+            for r in _resumir_simples(bloco, resp):
+                saida[r["linha"]] = r
+        ok_estados = SIMPLES_ESTADOS_OK
+    else:
+        ok_estados = ESTADOS_CALCULADOS
+
+    linhas, tot = [], {"calcCBS": Decimal("0"), "calcIBS": Decimal("0"), "xmlCBS": Decimal("0"), "xmlIBS": Decimal("0")}
+    contagem: dict[str, int] = {}
+    for i, it in enumerate(itens):
+        item = {"nItem": it["nItem"], "ncm": it["ncm"], "produto": it["xProd"][:60], "cst": it["cst"], "cClassTrib": it["cClassTrib"],
+                "xml": {"vBC": _s(it["xmlBC"]), "vCBS": _s(it["xmlCBS"]), "vIBS": _s(it["xmlIBS"])}}
+        if i in pular:
+            item.update(status="PULADO", motivo=pular[i], calc=None, dif={}, erros=[])
+        else:
+            c = saida.get(i, {"estado": "SEM_RESPOSTA", "erros": [], "vBC": None, "vCBS": None, "vIBS": None})
+            st, dif = _status(it, c, ok_estados, tol)
+            item.update(status=st, estado=c["estado"], motivo=None, dif=dif, erros=c["erros"],
+                        calc={"vBC": c["vBC"], "vCBS": c["vCBS"], "vIBS": c["vIBS"]})
+            if st != "NAO_CALCULADO":
+                tot["calcCBS"] += _dec(c["vCBS"]); tot["calcIBS"] += _dec(c["vIBS"])
+                tot["xmlCBS"] += it["xmlCBS"] or Decimal("0"); tot["xmlIBS"] += it["xmlIBS"] or Decimal("0")
+        contagem[item["status"]] = contagem.get(item["status"], 0) + 1
+        linhas.append(item)
+    aviso = sorted({r["aviso"] for r in respostas if r.get("aviso")})
+    return {"regime": regime, "contagem": contagem, "totais": {k: f"{v:.2f}" for k, v in tot.items()}, "avisos": aviso, "itens": linhas}
+
+
+def _s(v: Decimal | None) -> str | None:
+    return None if v is None else f"{v:.2f}"
+
+
+def _coletar_xmls(arquivos: list[UploadFile]) -> list[tuple[str, bytes]]:
+    xmls: list[tuple[str, bytes]] = []
+    total = 0
+    for up in arquivos:
+        nome = up.filename or "arquivo"
+        dados = up.file.read(MAX_TOTAL_BYTES + 1)
+        total += len(dados)
+        if total > MAX_TOTAL_BYTES:
+            raise HTTPException(status_code=413, detail="Envio maior que 40 MB.")
+        if nome.lower().endswith(".zip"):
+            try:
+                with zipfile.ZipFile(io.BytesIO(dados)) as z:
+                    membros = [m for m in z.infolist() if m.filename.lower().endswith(".xml") and not m.is_dir()]
+                    if len(membros) > MAX_NOTAS or sum(m.file_size for m in membros) > MAX_TOTAL_BYTES:
+                        raise HTTPException(status_code=413, detail=f"ZIP com mais de {MAX_NOTAS} XMLs ou maior que 40 MB descompactado.")
+                    xmls += [(m.filename, z.read(m)) for m in membros]
+            except zipfile.BadZipFile as exc:
+                raise HTTPException(status_code=422, detail=f"{nome}: ZIP inválido") from exc
+        else:
+            xmls.append((nome, dados))
+    if not xmls:
+        raise HTTPException(status_code=422, detail="Envie ao menos um arquivo .xml (ou um .zip com XMLs).")
+    if len(xmls) > MAX_NOTAS:
+        raise HTTPException(status_code=413, detail=f"No máximo {MAX_NOTAS} notas por envio.")
+    return xmls
+
+
+@app.post("/api/xml/importar")
+def importar_xml(
+    arquivos: list[UploadFile] = File(...),
+    cAtivSN: str = Form("01", pattern=r"^\d{1,2}$"),
+    aliquotasEfetivas: str = Form(""),
+    tolerancia: str = Form("0.01"),
+) -> Any:
+    """Lê XMLs de NF-e/NFC-e, calcula CBS/IBS no motor oficial e compara com o que a nota destacou."""
+    tol = _decimal(tolerancia)
+    if tol is None or tol < 0:
+        raise HTTPException(status_code=422, detail="Tolerância inválida.")
+    aliq_sn = None
+    if aliquotasEfetivas.strip():
+        try:
+            aliq_sn = json.loads(aliquotasEfetivas)
+            if not isinstance(aliq_sn, dict) or not aliq_sn:
+                raise ValueError
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Alíquotas efetivas: informe um JSON, ex.: {\"anexoI\": {\"pCBSSN\": \"1.1612\", \"pIBSSN\": \"0.0129\"}}") from exc
+
+    xmls = _coletar_xmls(arquivos)
+
+    def trabalhar(par: tuple[str, bytes]) -> dict[str, Any]:
+        nome, dados = par
+        try:
+            nota = ler_nfe(dados)
+        except ValueError as exc:
+            return {"arquivo": nome, "erro": str(exc)}
+        r = _processar_nota(nota, cAtivSN.zfill(2), aliq_sn, tol)
+        return {"arquivo": nome, **{k: nota[k] for k in ("chave", "mod", "nNF", "dhEmi", "emitente", "crt")}, **r}
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        notas = list(pool.map(trabalhar, xmls))
+
+    geral: dict[str, int] = {}
+    tot = {"calcCBS": Decimal("0"), "calcIBS": Decimal("0"), "xmlCBS": Decimal("0"), "xmlIBS": Decimal("0")}
+    for n in notas:
+        for k, v in n.get("contagem", {}).items():
+            geral[k] = geral.get(k, 0) + v
+        for k in tot:
+            tot[k] += _dec(n.get("totais", {}).get(k))
+    return {
+        "resumo": {"notas": len(notas), "comErroLeitura": sum(1 for n in notas if "erro" in n), "itens": sum(geral.values()), "porStatus": geral},
+        "totais": {k: f"{v:.2f}" for k, v in tot.items()},
+        "avisos": sorted({a for n in notas for a in n.get("avisos", [])}),
+        "notas": notas,
+    }
