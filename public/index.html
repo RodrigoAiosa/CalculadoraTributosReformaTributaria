@@ -131,8 +131,19 @@
         <textarea id="s-aliq" rows="6"></textarea>
         <p class="hint">Informe só o anexo usado pelos itens. Anexos III–V aceitam também <code>semRedistribuicaoISS</code>. Atividade 09 exige <code>fatorR</code>.</p></div>
     </div>
-    <div class="card">
-      <div class="items-wrap"><table id="s-table" class="stack">
+    <div class="card" id="s-upload">
+      <b>Importar produtos (.xlsx)</b>
+      <p class="hint">Colunas obrigatórias: <b>Tipo</b> (NCM ou NBS), <b>NCM / NBS</b>, <b>cAtivSN</b>, <b>cClassTrib</b> e <b>Base de cálculo</b>. Opcionais: Descrição e Valor IS (0,00 se vazio). Usa a data, o documento, o CRT e as alíquotas efetivas acima. Aceita documentos com CRT (NF-e, NFC-e, CT-e…); a NFS-e permite só 1 item por nota, então use a digitação manual. Até 5.000 produtos e 10 MB.</p>
+      <input type="file" id="s-file" accept=".xlsx" style="margin-top:8px">
+      <div class="row-actions">
+        <button class="btn primary" type="button" id="s-import">Importar e calcular</button>
+        <a class="btn" href="/api/modelo-simples.xlsx">Baixar modelo</a>
+        <a class="btn" href="/exemplos/simples-1000.xlsx">Baixar exemplo com 1.000 produtos</a>
+      </div>
+    </div>
+    <details class="card" id="s-manual">
+      <summary>Ou digite poucos itens manualmente</summary>
+      <div class="items-wrap" style="margin-top:10px"><table id="s-table" class="stack">
         <thead><tr><th>Nº</th><th>cAtivSN</th><th>cClassTrib</th><th>Tipo</th><th>NCM / NBS</th><th>Base de cálculo</th><th>Valor IS</th><th></th></tr></thead>
         <tbody></tbody>
       </table></div>
@@ -142,7 +153,7 @@
         <button class="btn primary" type="button" id="s-go">Calcular</button>
       </div>
       <p class="hint">Documentos com CRT: base = vProd + vFrete + vSeg + vOutro − vDesc, sem IS; informe o IS já calculado (0.00 se não houver). Exemplo ilustrativo: ajuste ao seu caso.</p>
-    </div>
+    </details>
     <div id="s-out"></div>
   </section>
 </main>
@@ -363,6 +374,58 @@ $("r-import").onclick = async () => {
     }
     out.innerHTML = renderImportacao(data); tabelaImportacao();
     $("r-soerro").onchange = tabelaImportacao; $("r-csv").onclick = csvImportacao;
+  } catch (e) { out.innerHTML = `<div class="card"><div class="status err">${esc(e.message)}</div>${e.html || ""}</div>`; }
+  finally { btn.disabled = false; btn.textContent = "Importar e calcular"; }
+};
+
+
+// ---------- importação de planilha: Simples Nacional ----------
+let ultimaSimples = null;
+const OKS = ["CALCULADO", "CALCULO_SIMULADO"];
+function tabelaSimples() {
+  if (!ultimaSimples) return;
+  const soErro = $("s-soerro")?.checked;
+  const linhas = ultimaSimples.itens.filter((i) => !soErro || i.erros.length || !OKS.includes(i.estado));
+  $("s-tabimp").innerHTML = linhas.slice(0, 200).map((i) => `<tr><td>${i.linha}</td><td>${esc(i.tipo)} ${esc(i.codigo)}</td><td>${esc(i.cativ)}/${esc(i.cClassTrib)}</td>
+    <td><span class="pill ${ESTADO[i.estado] || "neutral"}">${esc(i.estado)}</span>${i.erros.map((e) => `<div class="hint" style="color:var(--err)"><b>${esc(e.code)}</b> ${esc(e.title)}</div>`).join("")}${i.avisos.map((a) => `<div class="hint">${esc(a)}</div>`).join("")}</td>
+    <td class="num">${fmtMoeda(i.vBC)}</td><td class="num">${fmtMoeda(i.vCBS)}</td><td class="num">${fmtMoeda(i.vIBS)}</td><td class="num">${fmtMoeda(i.vIS)}</td><td class="num">${fmtMoeda(i.total)}</td></tr>`).join("");
+  $("s-nota").textContent = linhas.length > 200 ? `Mostrando 200 de ${linhas.length} linhas. Baixe o CSV para ver todas.` : `${linhas.length} linha(s).`;
+}
+function csvSimples() {
+  const cab = ["linha", "tipo", "codigo", "cAtivSN", "cClassTrib", "estado", "vBC", "vCBS", "vIBS", "vIS", "total", "erros"];
+  const q = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const linhas = ultimaSimples.itens.map((i) => [i.linha, i.tipo, i.codigo, i.cativ, i.cClassTrib, i.estado, i.vBC, i.vCBS, i.vIBS, i.vIS, i.total, i.erros.map((e) => `${e.code} ${e.title}`).join(" | ")].map(q).join(";"));
+  const blob = new Blob(["\ufeff" + [cab.join(";"), ...linhas].join("\n")], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "resultado-simples.csv"; a.click();
+}
+function renderSimplesImportacao(j) {
+  ultimaSimples = j; const r = j.resumo, t = j.totais;
+  const chips = Object.entries(r.porEstado).map(([k, v]) => `<span class="pill ${ESTADO[k] || "neutral"}">${esc(k)}: ${v}</span>`).join("");
+  return `<div class="card"><b>${r.produtos} produtos calculados em ${r.blocos} bloco(s) — ${r.comErro} com problema</b>
+    <div class="chips" style="margin:8px 0">${chips}</div>
+    ${j.avisos.length ? `<div class="status warn">Avisos do motor: ${esc(j.avisos.join(" | "))}</div>` : ""}
+    <div class="grid" style="margin:8px 0"><div><label>Base total</label><b>${fmtMoeda(t.vBC)}</b></div><div><label>CBS total</label><b>${fmtMoeda(t.vCBS)}</b></div><div><label>IBS total</label><b>${fmtMoeda(t.vIBS)}</b></div><div><label>IS total</label><b>${fmtMoeda(t.vIS)}</b></div><div><label>Total de tributos</label><b>${fmtMoeda(t.total)}</b></div></div>
+    <div class="row-actions"><label style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="s-soerro" style="width:auto"> só itens com problema</label><button class="btn" type="button" id="s-csv">Baixar resultado (.csv)</button><span class="hint" id="s-nota"></span></div>
+    <div class="scroll" style="margin-top:8px"><table><thead><tr><th>Linha</th><th>Produto</th><th>cAtivSN/cClassTrib</th><th>Estado</th><th class="num">Base</th><th class="num">CBS</th><th class="num">IBS</th><th class="num">IS</th><th class="num">Total</th></tr></thead><tbody id="s-tabimp"></tbody></table></div></div>`;
+}
+$("s-import").onclick = async () => {
+  const out = $("s-out"), btn = $("s-import"), f = $("s-file").files[0];
+  if (!f) { out.innerHTML = `<div class="card"><div class="status err">Escolha um arquivo .xlsx primeiro (ou baixe o modelo).</div></div>`; return; }
+  const fd = new FormData(); fd.append("arquivo", f);
+  fd.append("data", $("s-data").value); fd.append("tpDoc", $("s-tpdoc").value); fd.append("CRT", $("s-crt").value);
+  fd.append("aliquotasEfetivas", $("s-aliq").value.trim());
+  out.innerHTML = ""; btn.disabled = true; btn.textContent = "Calculando… (arquivos grandes e motor dormindo podem levar alguns minutos)";
+  try {
+    const resp = await fetch("/api/simples-nacional/importar", { method: "POST", body: fd });
+    let data = null; try { data = await resp.json(); } catch { /* sem corpo */ }
+    if (!resp.ok) {
+      const d = data?.detail;
+      const linhas = d && Array.isArray(d.linhas) ? `<ul class="errs">${d.linhas.map((l) => `<li>${esc(l)}</li>`).join("")}</ul>` : "";
+      const msg = Array.isArray(d) ? d.map((e) => `${(e.loc || []).slice(1).join(".")}: ${e.msg}`).join("; ") : (typeof d === "string" ? d : d?.mensagem || (d?.errors ? `${d.title} — ` + d.errors.map((e) => `${e.code} ${e.pointer || ""}: ${e.detail || e.title}`).join(" | ") : JSON.stringify(d ?? data)));
+      throw Object.assign(new Error(`HTTP ${resp.status} — ${msg}`), { html: linhas });
+    }
+    out.innerHTML = renderSimplesImportacao(data); tabelaSimples();
+    $("s-soerro").onchange = tabelaSimples; $("s-csv").onclick = csvSimples;
   } catch (e) { out.innerHTML = `<div class="card"><div class="status err">${esc(e.message)}</div>${e.html || ""}</div>`; }
   finally { btn.disabled = false; btn.textContent = "Importar e calcular"; }
 };

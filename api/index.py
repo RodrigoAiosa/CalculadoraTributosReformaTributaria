@@ -224,8 +224,15 @@ COLUNAS = {  # cabeçalho normalizado -> campo interno
     "qtd": "quantidade",
     "unidade": "unidade",
     "descricao": "descricao",
+    "cativsn": "cativsn",
+    "valoris": "valoris",
+    "valorimpostoseletivo": "valoris",
 }
-OBRIGATORIAS = {"tipo": "Tipo", "codigo": "NCM / NBS", "cst": "CST", "cclasstrib": "cClassTrib", "base": "Base de cálculo"}
+OBRIGATORIAS_POR = {
+    "regular": {"tipo": "Tipo", "codigo": "NCM / NBS", "cst": "CST", "cclasstrib": "cClassTrib", "base": "Base de cálculo"},
+    "simples": {"tipo": "Tipo", "codigo": "NCM / NBS", "cativsn": "cAtivSN", "cclasstrib": "cClassTrib", "base": "Base de cálculo"},
+}
+TPDOC_COM_CRT = {"55", "65", "57", "67", "63", "93", "62"}  # a NFS-e (91) aceita 1 item por nota: fora da importação
 
 
 def _norm(texto: Any) -> str:
@@ -254,7 +261,7 @@ def _decimal(v: Any) -> Decimal | None:
         return None
 
 
-def ler_planilha(conteudo: bytes) -> list[dict[str, Any]]:
+def ler_planilha(conteudo: bytes, regime: str = "regular") -> list[dict[str, Any]]:
     """Lê o .xlsx e valida. Levanta HTTP 422 com a lista de problemas (colunas ou linhas)."""
     from openpyxl import load_workbook
 
@@ -273,7 +280,7 @@ def ler_planilha(conteudo: bytes) -> list[dict[str, Any]]:
             break
         if numero >= 10:
             break
-    faltam = [nome for chave, nome in OBRIGATORIAS.items() if chave not in mapa]
+    faltam = [nome for chave, nome in OBRIGATORIAS_POR[regime].items() if chave not in mapa]
     if not mapa or faltam:
         raise HTTPException(
             status_code=422,
@@ -296,9 +303,20 @@ def ler_planilha(conteudo: bytes) -> list[dict[str, Any]]:
             erros.append("NCM deve ter 8 dígitos")
         if tipo == "NBS" and not re.fullmatch(r"\d{9}", codigo):
             erros.append("NBS deve ter 9 dígitos")
-        cst = _codigo(get("cst"), 3)
-        if not re.fullmatch(r"\d{3}", cst):
-            erros.append("CST deve ter 3 dígitos")
+        cst, ativ, valor_is = "", "", Decimal("0")
+        if regime == "regular":
+            cst = _codigo(get("cst"), 3)
+            if not re.fullmatch(r"\d{3}", cst):
+                erros.append("CST deve ter 3 dígitos")
+        else:
+            ativ = _codigo(get("cativsn"), 2)
+            if not re.fullmatch(r"\d{2}", ativ):
+                erros.append("cAtivSN deve ter 1 ou 2 dígitos (ex.: 01)")
+            if _texto(get("valoris")):
+                valor_is = _decimal(get("valoris"))
+                if valor_is is None or valor_is < 0:
+                    erros.append("Valor IS inválido")
+                    valor_is = Decimal("0")
         ccls = _codigo(get("cclasstrib"), 6)
         if not re.fullmatch(r"\d{6}", ccls):
             erros.append("cClassTrib deve ter 6 dígitos")
@@ -311,7 +329,7 @@ def ler_planilha(conteudo: bytes) -> list[dict[str, Any]]:
         if erros:
             problemas.append(f"Linha {numero}: " + "; ".join(erros))
             continue
-        itens.append({"linha": numero, "tipo": tipo, "codigo": codigo, "cst": cst, "cClassTrib": ccls,
+        itens.append({"linha": numero, "tipo": tipo, "codigo": codigo, "cst": cst, "cativ": ativ, "valoris": valor_is, "cClassTrib": ccls,
                       "base": base, "quantidade": qtd, "unidade": _texto(get("unidade")) or None})
         if len(itens) > MAX_LINHAS:
             raise HTTPException(status_code=422, detail=f"A planilha excede o limite de {MAX_LINHAS} produtos.")
@@ -436,3 +454,110 @@ def modelo() -> StreamingResponse:
     buf.seek(0)
     return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                              headers={"Content-Disposition": 'attachment; filename="modelo-produtos.xlsx"'})
+
+
+SIMPLES_ESTADOS_OK = {"CALCULADO"}
+
+
+def _bloco_simples(ctx: dict[str, Any], bloco: list[dict[str, Any]]) -> dict[str, Any]:
+    itens = []
+    for i, it in enumerate(bloco, start=1):
+        d: dict[str, Any] = {"numero": i, "cAtivSN": it["cativ"], "cClassTrib": it["cClassTrib"],
+                             "baseCalculo": f"{it['base']:.2f}", "valorImpostoSeletivo": f"{it['valoris']:.2f}"}
+        d[it["tipo"].lower()] = it["codigo"]
+        itens.append(d)
+    body = {"id": uuid.uuid4().hex, "versao": "3.0.0", "data": ctx["data"], "tpDoc": ctx["tpDoc"], "CRT": ctx["CRT"],
+            "aliquotasEfetivas": ctx["aliquotas"], "itens": itens}
+    return _call("simples", "POST", SIMPLES_CALCULO, json=body)
+
+
+def _resumir_simples(bloco: list[dict[str, Any]], resp: dict[str, Any]) -> list[dict[str, Any]]:
+    res = resp.get("resultado") or {}
+    objetos = {o.get("nObj"): o for o in res.get("objetos", [])}
+    avisos = {i.get("numero"): i.get("avisos") or [] for i in (res.get("resolucaoAliquotas") or {}).get("itens", [])}
+    saida = []
+    for i, it in enumerate(bloco, start=1):
+        o = objetos.get(i, {})
+        t = o.get("tribCalc") or {}
+        saida.append({
+            "linha": it["linha"], "tipo": it["tipo"], "codigo": it["codigo"], "cativ": it["cativ"], "cClassTrib": it["cClassTrib"],
+            "estado": o.get("estadoItem", "SEM_RESPOSTA"),
+            "vBC": t.get("vBC"), "vCBS": t.get("vCBSSN"), "vIBS": t.get("vIBSSN"), "vIS": (t.get("IS") or {}).get("valor"), "total": t.get("totalItem"),
+            "erros": [{"code": e.get("code"), "title": e.get("title"), "detail": e.get("detail")} for e in o.get("erros", [])],
+            "avisos": [a if isinstance(a, str) else str(a) for a in avisos.get(i, [])],
+        })
+    return saida
+
+
+@app.post("/api/simples-nacional/importar")
+def importar_simples(
+    arquivo: UploadFile = File(...),
+    data: str = Form(..., pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    tpDoc: str = Form(...),
+    CRT: str = Form(...),
+    aliquotasEfetivas: str = Form(...),
+) -> Any:
+    """Calcula CBS/IBS no Simples Nacional para os produtos de uma planilha .xlsx (documentos com CRT)."""
+    import json
+
+    if tpDoc not in TPDOC_COM_CRT:
+        raise HTTPException(status_code=422, detail="A importação aceita documentos com CRT (55, 65, 57, 67, 63, 93, 62). A NFS-e (91) admite só 1 item por nota: use a digitação manual.")
+    try:
+        aliq = json.loads(aliquotasEfetivas)
+        if not isinstance(aliq, dict) or not aliq:
+            raise ValueError
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="Alíquotas efetivas: informe um JSON com o(s) anexo(s) usado(s), ex.: {\"anexoI\": {\"pCBSSN\": \"1.1612\", \"pIBSSN\": \"0.0129\"}}") from exc
+
+    conteudo = arquivo.file.read(MAX_BYTES + 1)
+    if len(conteudo) > MAX_BYTES:
+        raise HTTPException(status_code=413, detail="Arquivo maior que 10 MB.")
+    itens = ler_planilha(conteudo, regime="simples")
+
+    ctx = {"data": data, "tpDoc": tpDoc, "CRT": CRT, "aliquotas": aliq}
+    blocos = [itens[i : i + CHUNK] for i in range(0, len(itens), CHUNK)]
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        respostas = list(pool.map(lambda b: _bloco_simples(ctx, b), blocos))
+
+    resultado = [r for b, resp in zip(blocos, respostas) for r in _resumir_simples(b, resp)]
+    por_estado: dict[str, int] = {}
+    totais = {"vBC": Decimal("0"), "vCBS": Decimal("0"), "vIBS": Decimal("0"), "vIS": Decimal("0"), "total": Decimal("0")}
+    for r in resultado:
+        por_estado[r["estado"]] = por_estado.get(r["estado"], 0) + 1
+        if r["estado"] in SIMPLES_ESTADOS_OK:
+            for k in totais:
+                totais[k] += _dec(r[k])
+    avisos = sorted({a for r in resultado for a in r["avisos"]})
+    return {
+        "resumo": {"produtos": len(resultado), "blocos": len(blocos), "porEstado": por_estado,
+                   "comErro": sum(1 for r in resultado if r["erros"] or r["estado"] not in SIMPLES_ESTADOS_OK)},
+        "totais": {k: f"{v:.2f}" for k, v in totais.items()},
+        "avisos": avisos[:20],
+        "itens": resultado,
+    }
+
+
+@app.get("/api/modelo-simples.xlsx")
+def modelo_simples() -> StreamingResponse:
+    """Planilha modelo da importação do Simples Nacional."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Produtos"
+    ws.append(["Tipo", "NCM / NBS", "Descrição", "cAtivSN", "cClassTrib", "Base de cálculo", "Valor IS"])
+    ws.append(["NCM", "22030000", "Cerveja", "01", "000001", 10000.00, 0.00])
+    ws.append(["NCM", "10063021", "Arroz", "01", "200003", 100.00, 0.00])
+    for col, largura in zip("ABCDEFG", (8, 14, 36, 9, 12, 16, 10)):
+        ws.column_dimensions[col].width = largura
+    for c in ws[1]:
+        c.font = Font(bold=True)
+    for linha in ws.iter_rows(min_row=2, max_col=5):
+        for c in (linha[1], linha[3], linha[4]):
+            c.number_format = "@"
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                             headers={"Content-Disposition": 'attachment; filename="modelo-produtos-simples.xlsx"'})
