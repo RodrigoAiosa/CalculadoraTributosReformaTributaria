@@ -152,3 +152,11 @@ def test_dados_abertos_lista_fechada(monkeypatch):
 
 def test_health(monkeypatch):
     assert client.get("/api/health").json() == {"ok": True, "motores": {"regular": True, "simples": True}}
+
+
+def test_aquecer_informa_quem_esta_pronto(monkeypatch):
+    def handler(r):
+        return httpx.Response(200, json={}) if "regular.test" in str(r.url) else httpx.Response(503)
+
+    monkeypatch.setattr(index.httpx, "Client", lambda **kw: httpx.Client(transport=httpx.MockTransport(handler)))
+    assert client.get("/api/aquecer").json() == {"regular": True, "simples": False}

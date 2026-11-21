@@ -19,7 +19,7 @@ from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 MAX_ITENS = 990  # limite de itens de uma NF-e
-TIMEOUT = httpx.Timeout(70.0, connect=15.0)  # motor no plano free pode levar ~1 min para acordar
+TIMEOUT = httpx.Timeout(150.0, connect=20.0)  # motor free pode levar 2-3 min para acordar (maxDuration=300 no vercel.json)
 RETRY_STATUS = {502, 503, 504}
 
 # Caminhos dos motores (prefixo /api é o context-path do Spring dos dois projetos).
@@ -28,6 +28,8 @@ REGULAR_ERROS = "/api/calculadora/observabilidade/erros"
 SIMPLES_CALCULO = "/api/calculadora/observabilidade/simples-nacional/nao-assistido"
 SIMPLES_ERROS = "/api/calculadora/observabilidade/simples-nacional/erros"
 REGULAR_DADOS = "/api/calculadora/dados-abertos"
+REGULAR_VERSAO = "/api/calculadora/dados-abertos/versao"
+SIMPLES_VERSAO = "/api/versao"
 
 # Consultas de dados abertos liberadas (lista fechada: o front não vira proxy aberto).
 DADOS_ABERTOS = {
@@ -132,6 +134,27 @@ def health() -> dict[str, Any]:
             "simples": bool(os.environ.get("ENGINE_SIMPLES_URL")),
         },
     }
+
+
+def _ping(engine: str, path: str) -> bool:
+    """True se o motor respondeu rápido; a própria chamada já faz o Render acordá-lo."""
+    try:
+        url = _engine_url(engine) + path
+        with httpx.Client(timeout=httpx.Timeout(8.0, connect=5.0)) as client:
+            return client.get(url).status_code < 400
+    except (httpx.HTTPError, HTTPException):
+        return False
+
+
+@app.get("/api/aquecer")
+def aquecer() -> dict[str, bool]:
+    """Acorda os motores (plano free dorme). O front chama isso ao abrir a página."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        reg = pool.submit(_ping, "regular", REGULAR_VERSAO)
+        sim = pool.submit(_ping, "simples", SIMPLES_VERSAO)
+        return {"regular": reg.result(), "simples": sim.result()}
 
 
 @app.post("/api/regime-geral/calcular")

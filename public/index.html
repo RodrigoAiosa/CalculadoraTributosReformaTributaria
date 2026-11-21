@@ -59,6 +59,7 @@
 <header>
   <h1>Calculadora de CBS / IBS</h1>
   <p>Cálculo feito pelos motores oficiais da Receita Federal (repositórios ReceitaFederal no GitHub). Resultado simulado, sem valor fiscal.</p>
+  <p id="motores" style="margin-top:8px">Motores: verificando…</p>
 </header>
 <main>
   <div class="tabs">
@@ -289,6 +290,18 @@ $("r-go").onclick = () => run($("r-go"), $("r-out"), () => ($("r-json").value.tr
 $("s-go").onclick = () => run($("s-go"), $("s-out"), payloadSimples, "/api/simples-nacional/calcular", renderSimples);
 
 $("r-example").click(); $("s-example").click();
+
+// ---------- aquece os motores (plano free dorme após inatividade) ----------
+async function aquecer(tentativa = 0) {
+  const el = $("motores");
+  try {
+    const r = await (await fetch("/api/aquecer")).json();
+    const txt = (ok) => (ok ? "pronto" : "acordando…");
+    el.textContent = `Motores — regime regular: ${txt(r.regular)} · Simples: ${txt(r.simples)}`;
+    if (!(r.regular && r.simples) && tentativa < 30) setTimeout(() => aquecer(tentativa + 1), 8000);
+  } catch { el.textContent = "Motores: não foi possível verificar"; }
+}
+aquecer();
 </script>
 </body>
 </html>
