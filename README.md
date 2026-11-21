@@ -71,3 +71,17 @@ Na aba *Regime regular* o usuário sobe uma planilha em vez de digitar os itens 
 - **Atualizações da Receita:** o `Dockerfile` clona `main` por padrão. Para builds reproduzíveis, fixe tags com
   `REGULAR_REF`/`SIMPLES_REF` (build args) e refaça o deploy quando a Receita publicar versões novas.
 - Os valores calculados são **simulações** e não substituem a apuração oficial.
+
+## Importação de planilha — Simples Nacional
+
+Na aba **Simples Nacional**, envie um `.xlsx` (`POST /api/simples-nacional/importar`). Colunas obrigatórias:
+**Tipo** (NCM ou NBS), **NCM / NBS**, **cAtivSN**, **cClassTrib** e **Base de cálculo**; opcionais: Descrição e Valor IS.
+Data, documento (tpDoc), CRT e alíquotas efetivas (JSON) vêm do formulário e valem para todos os itens, que são
+enviados ao motor em blocos de 100. Só documentos com CRT (55, 65, 57, 67, 63, 93, 62): a NFS-e (91) aceita 1 item por nota.
+
+- Modelo: `/api/modelo-simples.xlsx`. Exemplo: `/exemplos/simples-1000.xlsx` (1.000 produtos de NF-e, atividades 01/02,
+  Anexo I; validado no motor real: 1000/1000 `CALCULADO`). Gerador: `tools/gerar_exemplo_simples.py`.
+- Cada anexo usado pelas atividades da planilha precisa constar nas alíquotas efetivas; a atividade 09 exige `fatorR`.
+- O motor devolve `NAO_CALCULADO` (sem erro) para atividade não admitida no tpDoc; confira a coluna Estado.
+- Pares recusados pelo motor no exemplo: cClassTrib 200044 não vale para tpDoc 55 (VSN-022) e alguns NCM
+  sem vínculo com 200003/200004/200034 (VSN-047) — foram retirados.
