@@ -158,5 +158,6 @@ def test_aquecer_informa_quem_esta_pronto(monkeypatch):
     def handler(r):
         return httpx.Response(200, json={}) if "regular.test" in str(r.url) else httpx.Response(503)
 
-    monkeypatch.setattr(index.httpx, "Client", lambda **kw: httpx.Client(transport=httpx.MockTransport(handler)))
+    real_client = httpx.Client
+    monkeypatch.setattr(index.httpx, "Client", lambda **kw: real_client(transport=httpx.MockTransport(handler)))
     assert client.get("/api/aquecer").json() == {"regular": True, "simples": False}
