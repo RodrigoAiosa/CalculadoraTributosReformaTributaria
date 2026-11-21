@@ -40,6 +40,18 @@
   pre { background:#0f1722; color:#d6e2f0; padding:12px; border-radius:8px; overflow:auto; font-size:12px; max-height:380px; }
   .hint { font-size:12px; color:var(--mute); margin:6px 0 0; }
   .errs { margin:4px 0 0; padding-left:18px; color:var(--err); font-size:12.5px; }
+  @media (max-width:640px) {
+    .items-wrap { overflow-x:visible; }
+    table.stack thead { display:none; }
+    table.stack, table.stack tbody { display:block; }
+    table.stack tr { display:grid; grid-template-columns:1fr 1fr; gap:8px 10px; border:1px solid var(--line); border-radius:8px; padding:10px; margin-bottom:10px; position:relative; }
+    table.stack td { display:block; width:auto !important; padding:0; }
+    table.stack td::before { content:attr(data-label); display:block; font-size:11px; color:var(--mute); margin-bottom:2px; }
+    table.stack td:last-child { position:absolute; top:4px; right:6px; }
+    table.stack td:last-child::before { content:none; }
+    table.stack td input, table.stack td select { font-size:16px; padding:8px; }
+    .grid { grid-template-columns:1fr; }
+  }
   footer { text-align:center; color:var(--mute); font-size:12px; padding:0 16px 32px; }
 </style>
 </head>
@@ -70,7 +82,7 @@
       <p class="hint">As alíquotas acima são aplicadas a todos os itens. Antes de 2027 o motor <b>proíbe</b> informá-las: deixe os três campos em branco e use data de 2026.</p>
     </div>
     <div class="card">
-      <div class="items-wrap"><table id="r-table">
+      <div class="items-wrap"><table id="r-table" class="stack">
         <thead><tr><th>Nº</th><th>Tipo</th><th>NCM / NBS</th><th>CST</th><th>cClassTrib</th><th>Base de cálculo</th><th>Qtd.</th><th>Unid.</th><th></th></tr></thead>
         <tbody></tbody>
       </table></div>
@@ -104,7 +116,7 @@
         <p class="hint">Informe só o anexo usado pelos itens. Anexos III–V aceitam também <code>semRedistribuicaoISS</code>. Atividade 09 exige <code>fatorR</code>.</p></div>
     </div>
     <div class="card">
-      <div class="items-wrap"><table id="s-table">
+      <div class="items-wrap"><table id="s-table" class="stack">
         <thead><tr><th>Nº</th><th>cAtivSN</th><th>cClassTrib</th><th>Tipo</th><th>NCM / NBS</th><th>Base de cálculo</th><th>Valor IS</th><th></th></tr></thead>
         <tbody></tbody>
       </table></div>
@@ -146,7 +158,7 @@ function rowRegular(v = {}) {
     <td><button class="del" type="button" title="Remover">×</button></td>`;
   tr.querySelector('[data-k="tipo"]').value = v.tipo || "NCM";
   tr.querySelector(".del").onclick = () => { tr.remove(); renumber("r-table"); };
-  $("r-table").tBodies[0].appendChild(tr);
+  $("r-table").tBodies[0].appendChild(tr); labelCells("r-table");
 }
 function rowSimples(v = {}) {
   const tr = document.createElement("tr");
@@ -161,7 +173,11 @@ function rowSimples(v = {}) {
     <td><button class="del" type="button" title="Remover">×</button></td>`;
   tr.querySelector('[data-k="tipo"]').value = v.tipo || "NCM";
   tr.querySelector(".del").onclick = () => { tr.remove(); renumber("s-table"); };
-  $("s-table").tBodies[0].appendChild(tr);
+  $("s-table").tBodies[0].appendChild(tr); labelCells("s-table");
+}
+function labelCells(tableId) {
+  const heads = [...$(tableId).tHead.rows[0].cells].map((h) => h.textContent);
+  [...$(tableId).tBodies[0].rows].forEach((tr) => [...tr.cells].forEach((td, i) => { td.dataset.label = heads[i] || ""; }));
 }
 function renumber(tableId) {
   [...$(tableId).tBodies[0].rows].forEach((r, i) => { r.querySelector('[data-k="numero"]').value = i + 1; });
