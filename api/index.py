@@ -265,8 +265,10 @@ def _decimal(v: Any) -> Decimal | None:
         return None
 
 
-def ler_planilha(conteudo: bytes, regime: str = "regular") -> list[dict[str, Any]]:
-    """Lê o .xlsx e valida. Levanta HTTP 422 com a lista de problemas (colunas ou linhas)."""
+def ler_planilha(conteudo: bytes, regime: str = "regular", invalidas: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+    """Lê o .xlsx e valida. Levanta HTTP 422 com a lista de problemas (colunas ou linhas).
+
+    Com `invalidas` (lista), as linhas malformadas não interrompem a leitura: vão para a lista, com os dados crus."""
     from openpyxl import load_workbook
 
     try:
@@ -331,9 +333,13 @@ def ler_planilha(conteudo: bytes, regime: str = "regular") -> list[dict[str, Any
         if _texto(get("quantidade")) and (qtd is None or qtd <= 0):
             erros.append("Quantidade inválida")
         if erros:
-            problemas.append(f"Linha {numero}: " + "; ".join(erros))
+            if invalidas is not None:
+                invalidas.append({"linha": numero, "tipo": tipo, "codigo": codigo, "cst": cst, "cativ": ativ, "cClassTrib": ccls,
+                                  "descricao": _texto(get("descricao")), "erros": erros})
+            else:
+                problemas.append(f"Linha {numero}: " + "; ".join(erros))
             continue
-        itens.append({"linha": numero, "tipo": tipo, "codigo": codigo, "cst": cst, "cativ": ativ, "valoris": valor_is, "cClassTrib": ccls,
+        itens.append({"linha": numero, "tipo": tipo, "codigo": codigo, "descricao": _texto(get("descricao")), "cst": cst, "cativ": ativ, "valoris": valor_is, "cClassTrib": ccls,
                       "base": base, "quantidade": qtd, "unidade": _texto(get("unidade")) or None})
         if len(itens) > MAX_LINHAS:
             raise HTTPException(status_code=422, detail=f"A planilha excede o limite de {MAX_LINHAS} produtos.")
@@ -341,7 +347,7 @@ def ler_planilha(conteudo: bytes, regime: str = "regular") -> list[dict[str, Any
     if problemas:
         extra = f" (+{len(problemas) - 30} outras)" if len(problemas) > 30 else ""
         raise HTTPException(status_code=422, detail={"mensagem": "Há linhas inválidas na planilha." + extra, "linhas": problemas[:30]})
-    if not itens:
+    if not itens and not invalidas:
         raise HTTPException(status_code=422, detail="A planilha não tem produtos abaixo do cabeçalho.")
     return itens
 
@@ -899,3 +905,168 @@ def importar_xml(
         }
 
     return _responder(trabalho, progresso)
+
+
+# ---------------------------------------------------------------- validação prévia da planilha
+MAX_VINCULOS = 300   # pares (NCM/NBS, cClassTrib) conferidos no motor por planilha
+MAX_SUGESTOES = 200  # linhas com sugestão por descrição (limita o custo da busca)
+CLASSE_GENERICA = "000001"
+
+
+def _chave(d: Any, *nomes: str) -> str:
+    for n in nomes:
+        if isinstance(d, dict) and d.get(n) not in (None, ""):
+            return str(d[n])
+    return ""
+
+
+def _lista_dados(caminho: str, data: str) -> list[Any]:
+    r = _call("regular", "GET", f"{REGULAR_DADOS}/{caminho}", params={"data": data})["resultado"]
+    return r if isinstance(r, list) else []
+
+
+def _carregar_referencias(data: str) -> dict[str, Any]:
+    """Códigos vigentes na data, direto do motor (fonte oficial): NCM, NBS e CST → cClassTrib."""
+    with ThreadPoolExecutor(max_workers=3) as ex:
+        f_ncm = ex.submit(_lista_dados, "ncm/vigentes", data)
+        f_nbs = ex.submit(_lista_dados, "nbs/lista", data)
+        f_cst = ex.submit(_lista_dados, "situacoes-tributarias/cbs-ibs", data)
+        ncm, nbs, csts = f_ncm.result(), f_nbs.result(), f_cst.result()
+    cst_classes: dict[str, dict[str, str]] = {}
+    for c in csts:
+        filhos = next((v for v in c.values() if isinstance(v, list) and v and isinstance(v[0], dict)), []) if isinstance(c, dict) else []
+        cst_classes[_chave(c, "codigo")] = {_chave(f, "codigo"): _chave(f, "descricao") for f in filhos}
+    return {
+        "NCM": {_chave(n, "codigo", "ncm"): _chave(n, "descricao") for n in ncm if _chave(n, "codigo", "ncm")},
+        "NBS": {_chave(n, "codigo", "nbs"): _chave(n, "descricao") for n in nbs if _chave(n, "codigo", "nbs")},
+        "cst": cst_classes,
+    }
+
+
+def _tokens(texto: str) -> set[str]:
+    return {t for t in re.findall(r"[a-z0-9]{4,}", unicodedata.normalize("NFKD", texto.lower()).encode("ascii", "ignore").decode())}
+
+
+def sugerir_codigos(tipo: str, codigo: str, descricao: str, base: dict[str, str], buscar_por_descricao: bool = True) -> list[dict[str, str]]:
+    """Códigos vigentes parecidos: mesmo prefixo (do mais longo ao mais curto) e, se houver descrição, palavras em comum."""
+    achados: dict[str, str] = {}
+    if codigo.isdigit():
+        for n in range(min(len(codigo) - 1, 7), 3, -1):
+            pref = codigo[:n]
+            achados = {c: d for c, d in sorted(base.items()) if c.startswith(pref)}
+            if achados:
+                break
+    sugestoes = [{"valor": c, "descricao": d} for c, d in list(achados.items())[:5]]
+    if buscar_por_descricao and not sugestoes and descricao:
+        alvo = _tokens(descricao)
+        if alvo:
+            pontos = sorted(((len(alvo & _tokens(d)), c) for c, d in base.items()), reverse=True)[:5]
+            sugestoes = [{"valor": c, "descricao": base[c]} for p, c in pontos if p > 0]
+    return sugestoes
+
+
+def _consulta_segura(caminho: str, params: dict[str, str]) -> dict[str, Any] | None:
+    try:
+        r = _call("regular", "GET", f"{REGULAR_DADOS}/{caminho}", params=params)["resultado"]
+        return r if isinstance(r, dict) else None
+    except HTTPException:
+        return None
+
+
+def validar_itens(itens: list[dict[str, Any]], invalidas: list[dict[str, Any]], regime: str, data: str) -> dict[str, Any]:
+    ref = _carregar_referencias(data)
+    todas_classes = {c: cst for cst, cs in ref["cst"].items() for c in cs}
+    problemas: dict[int, dict[str, Any]] = {}
+
+    def anotar(l: int, gravidade: str, campo: str, msg: str, sugestoes: list[dict[str, str]] | None = None) -> None:
+        p = problemas.setdefault(l, {"linha": l, "status": "ok", "problemas": []})
+        if gravidade == "erro":
+            p["status"] = "erro"
+        elif p["status"] == "ok":
+            p["status"] = "aviso"
+        p["problemas"].append({"gravidade": gravidade, "campo": campo, "mensagem": msg, **({"sugestoes": sugestoes} if sugestoes else {})})
+
+    for inv in invalidas:
+        for e in inv["erros"]:
+            anotar(inv["linha"], "erro", "formato", e)
+    n_desc = 0
+    for it in itens:
+        l, tipo, cod = it["linha"], it["tipo"], it["codigo"]
+        if cod not in ref[tipo]:
+            busca = n_desc < MAX_SUGESTOES
+            n_desc += 1
+            anotar(l, "erro", tipo, f"{tipo} {cod} não está vigente em {data[8:]}/{data[5:7]}/{data[:4]}.",
+                   sugerir_codigos(tipo, cod, it.get("descricao", ""), ref[tipo], busca))
+        ccls = it["cClassTrib"]
+        if regime == "regular":
+            classes = ref["cst"].get(it["cst"])
+            if classes is None:
+                anotar(l, "erro", "CST", f"CST {it['cst']} não existe.", [{"valor": c, "descricao": ""} for c in sorted(ref["cst"])[:8]])
+            elif ccls not in classes:
+                dono = todas_classes.get(ccls)
+                if dono:
+                    anotar(l, "erro", "cClassTrib", f"O cClassTrib {ccls} pertence ao CST {dono}, não ao {it['cst']}.", [{"valor": dono, "descricao": "CST correto para este cClassTrib"}])
+                else:
+                    anotar(l, "erro", "cClassTrib", f"cClassTrib {ccls} não existe para o CST {it['cst']}.", [{"valor": c, "descricao": d} for c, d in sorted(classes.items())[:6]])
+        elif ccls not in todas_classes:
+            anotar(l, "erro", "cClassTrib", f"cClassTrib {ccls} não existe na data informada.")
+
+    # conferências item a item no motor (só para códigos que passaram nas etapas acima)
+    validos = [it for it in itens if it["linha"] not in problemas or problemas[it["linha"]]["status"] != "erro"]
+    pares: dict[tuple[str, str, str], list[int]] = {}
+    for it in validos:
+        if it["cClassTrib"] != CLASSE_GENERICA:
+            pares.setdefault((it["tipo"], it["codigo"], it["cClassTrib"]), []).append(it["linha"])
+    ncms = {it["codigo"]: [] for it in validos if it["tipo"] == "NCM"}
+    for it in validos:
+        if it["tipo"] == "NCM":
+            ncms[it["codigo"]].append(it["linha"])
+    pares_lista = list(pares)[:MAX_VINCULOS]
+
+    def vinculo(par: tuple[str, str, str]) -> tuple[tuple[str, str, str], bool | None]:
+        tipo, cod, ccls = par
+        r = _consulta_segura("classificacoes-tributarias/" + ("ncm-aplicavel" if tipo == "NCM" else "nbs-aplicavel"),
+                             {"cClassTrib": ccls, "ncm" if tipo == "NCM" else "nbs": cod, "dataOcorrenciaFatoGerador": data})
+        return par, (None if r is None else r.get("valido"))
+
+    def seletivo(cod: str) -> tuple[str, bool]:
+        r = _consulta_segura("ncm", {"ncm": cod, "data": data})
+        return cod, bool(r and r.get("tributadoPeloImpostoSeletivo"))
+
+    with ThreadPoolExecutor(max_workers=WORKERS) as ex:
+        res_v = list(ex.map(vinculo, pares_lista))
+        res_s = list(ex.map(seletivo, list(ncms)[:MAX_VINCULOS])) if regime == "regular" else []
+    for (tipo, cod, ccls), ok in res_v:
+        if ok is False:
+            for l in pares[(tipo, cod, ccls)]:
+                anotar(l, "aviso", "cClassTrib", f"O cClassTrib {ccls} não é aplicável ao {tipo} {cod} segundo o motor; o cálculo deve rejeitar o item.")
+    for cod, sim in res_s:
+        if sim:
+            for l in ncms[cod]:
+                anotar(l, "aviso", "NCM", f"O NCM {cod} está sujeito ao Imposto Seletivo; o cálculo exigirá os dados do IS.")
+
+    lista = sorted(problemas.values(), key=lambda p: p["linha"])
+    total = len(itens) + len(invalidas)
+    n_erro = sum(1 for p in lista if p["status"] == "erro")
+    n_aviso = sum(1 for p in lista if p["status"] == "aviso")
+    return {
+        "resumo": {"linhas": total, "ok": total - n_erro - n_aviso, "comAviso": n_aviso, "comErro": n_erro,
+                   "vinculosConferidos": len(pares_lista), "vinculosNaoConferidos": max(len(pares) - len(pares_lista), 0)},
+        "itens": lista[:500],
+        "truncado": len(lista) > 500,
+    }
+
+
+@app.post("/api/validar")
+def validar(
+    arquivo: UploadFile = File(...),
+    regime: str = Form("regular", pattern=r"^(regular|simples)$"),
+    dhFatoGerador: str = Form(..., pattern=r"^\d{4}-\d{2}-\d{2}"),
+) -> Any:
+    """Confere a planilha antes de calcular: formato, vigência de NCM/NBS, CST/cClassTrib e vínculos, com sugestões."""
+    conteudo = arquivo.file.read(MAX_BYTES + 1)
+    if len(conteudo) > MAX_BYTES:
+        raise HTTPException(status_code=413, detail="Arquivo maior que 10 MB.")
+    invalidas: list[dict[str, Any]] = []
+    itens = ler_planilha(conteudo, regime, invalidas)
+    return validar_itens(itens, invalidas, regime, dhFatoGerador[:10])

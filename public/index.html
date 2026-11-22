@@ -130,7 +130,7 @@
   .pill.ok { background:var(--ok-tint); color:var(--ok); } .pill.sim { background:var(--warn-tint); color:var(--warn); }
   .pill.err { background:var(--err-tint); color:var(--err); } .pill.neutral { background:#ECEEF3; color:var(--mute); }
   .status { margin:10px 0; padding:10px 14px; border-radius:var(--r-md); font-size:13.5px; background:#ECEEF3; }
-  .status.err { background:var(--err-tint); color:var(--err); } .status.warn { background:var(--warn-tint); color:var(--warn); }
+  .status.err { background:var(--err-tint); color:var(--err); } .status.warn { background:var(--warn-tint); color:var(--warn); } .status.ok { background:var(--ok-tint); color:var(--ok); }
   .status.wait { display:flex; gap:10px; align-items:center; background:var(--accent-tint); color:var(--accent-dark); }
   .status.wait::before { content:""; width:14px; height:14px; border-radius:50%; border:2px solid currentColor; border-right-color:transparent; animation:gira .8s linear infinite; flex:none; }
   @keyframes gira { to { transform:rotate(360deg); } }
@@ -227,6 +227,7 @@
         <p class="reqs">Colunas obrigatórias: <b>Tipo</b>, <b>NCM / NBS</b>, <b>CST</b>, <b>cClassTrib</b> e <b>Base de cálculo</b>. Opcionais: Descrição, Quantidade e Unidade. Até 5.000 produtos e 10 MB.</p>
         <div class="actions">
           <button class="btn primary" type="button" id="r-import">Calcular planilha</button>
+          <button class="btn" type="button" id="r-validar">Validar antes</button>
           <a class="link" href="/api/modelo.xlsx">Baixar modelo</a>
           <a class="link" href="/exemplos/produtos-1000.xlsx">Baixar exemplo com 1.000 produtos</a>
         </div>
@@ -280,6 +281,7 @@
         <p class="reqs">Colunas obrigatórias: <b>Tipo</b>, <b>NCM / NBS</b>, <b>cAtivSN</b>, <b>cClassTrib</b> e <b>Base de cálculo</b>. Opcionais: Descrição e Valor IS (0,00 se vazio). Funciona com documentos que têm CRT (NF-e, NFC-e, CT-e…); para NFS-e, que aceita 1 item por nota, digite manualmente. Até 5.000 produtos e 10 MB.</p>
         <div class="actions">
           <button class="btn primary" type="button" id="s-import">Calcular planilha</button>
+          <button class="btn" type="button" id="s-validar">Validar antes</button>
           <a class="link" href="/api/modelo-simples.xlsx">Baixar modelo</a>
           <a class="link" href="/exemplos/simples-1000.xlsx">Baixar exemplo com 1.000 produtos</a>
         </div>
@@ -626,6 +628,36 @@ $("s-import").onclick = async () => {
   finally { btn.disabled = false; btn.textContent = "Calcular planilha"; }
 };
 
+
+
+// ---------- validação prévia da planilha ----------
+function renderValidacao(j) {
+  const r = j.resumo;
+  const cls = r.comErro ? "err" : r.comAviso ? "warn" : "ok";
+  const titulo = r.comErro ? `${r.comErro} linha(s) com erro e ${r.comAviso} com aviso, de ${r.linhas}` : r.comAviso ? `Sem erros. ${r.comAviso} linha(s) com aviso, de ${r.linhas}` : `Planilha pronta: ${r.linhas} linha(s) sem apontamentos`;
+  const sug = (l) => l && l.length ? `<div class="hint">Sugestões: ${l.map((x) => `<code>${esc(x.valor)}</code>${x.descricao ? " " + esc(x.descricao.slice(0, 60)) : ""}`).join(" · ")}</div>` : "";
+  const linhas = j.itens.map((i) => `<tr><td>${i.linha}</td><td>${i.problemas.map((p) => `<div><span class="pill ${p.gravidade === "erro" ? "err" : "sim"}">${esc(p.campo)}</span> ${esc(p.mensagem)}${sug(p.sugestoes)}</div>`).join("")}</td></tr>`).join("");
+  return `<div class="card"><div class="status ${cls}"><b>${titulo}</b></div>
+    ${r.vinculosNaoConferidos ? `<p class="hint">${r.vinculosNaoConferidos} combinações de NCM/NBS e cClassTrib ficaram sem conferência (limite por planilha).</p>` : ""}
+    ${linhas ? `<div class="scroll" style="margin-top:8px"><table><thead><tr><th>Linha</th><th>Apontamentos</th></tr></thead><tbody>${linhas}</tbody></table></div>` : ""}
+    ${j.truncado ? `<p class="hint">Mostrando as 500 primeiras linhas com apontamento.</p>` : ""}</div>`;
+}
+async function validarPlanilha(pref, regime, dataIso) {
+  const out = $(pref + "-out"), btn = $(pref + "-validar"), f = $(pref + "-file").files[0];
+  if (!f) { out.innerHTML = `<div class="card"><div class="status err">Escolha uma planilha .xlsx para validar.</div></div>`; return; }
+  let dh; try { dh = dataIso(); } catch (e) { out.innerHTML = `<div class="card"><div class="status err">${esc(e.message)}</div></div>`; return; }
+  const fd = new FormData(); fd.append("arquivo", f); fd.append("regime", regime); fd.append("dhFatoGerador", dh);
+  btn.disabled = true; btn.textContent = "Validando…"; out.innerHTML = `<div class="card"><div class="status wait">Conferindo códigos com o motor da Receita…</div></div>`;
+  try {
+    const resp = await fetch("/api/validar", { method: "POST", body: fd });
+    const data = await resp.json().catch(() => null);
+    if (!resp.ok) { const d = data?.detail; throw new Error(`HTTP ${resp.status} — ${typeof d === "string" ? d : d?.mensagem || JSON.stringify(d ?? data)}`); }
+    out.innerHTML = renderValidacao(data);
+  } catch (e) { out.innerHTML = `<div class="card"><div class="status err">${esc(e.message)}</div></div>`; }
+  finally { btn.disabled = false; btn.textContent = "Validar antes"; }
+}
+$("r-validar").onclick = () => validarPlanilha("r", "regular", dhIso);
+$("s-validar").onclick = () => validarPlanilha("s", "simples", () => $("s-data").value);
 
 // ---------- leitura de XML de NF-e ----------
 let ultimaXml = null;
